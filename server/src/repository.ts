@@ -1,23 +1,66 @@
-import { demoBusiness, planCatalog, type Booking, type BookingStatus, type EmailMode, type JobType, type MessageKind, type MessageLog } from "@business-automation/shared";
+import {
+  planCatalog,
+  type Booking,
+  type BookingSource,
+  type BookingStatus,
+  type Business,
+  type BusinessSettings,
+  type BusinessType,
+  type EmailMode,
+  type JobType,
+  type Lead,
+  type LeadSource,
+  type MessageKind,
+  type MessageLog,
+  type PlanTier,
+} from "@business-automation/shared";
 import { randomUUID } from "node:crypto";
 import type { DatabaseClient } from "./db.js";
 
-type BookingRow = {
+type BusinessRow = {
   id: string;
+  name: string;
+  slug: string;
+  type: BusinessType;
+  admin_passcode_hash: string;
+  support_email: string;
+  current_plan: PlanTier;
+  settings_json: BusinessSettings | string;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type LeadRow = {
+  id: string;
+  business_id: string;
   name: string;
   email: string;
   phone: string;
-  service: "haircut" | "facial";
+  status: "new" | "converted";
+  source: LeadSource;
+  converted_booking_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type BookingRow = {
+  id: string;
+  business_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  service: string;
   scheduled_at: Date;
   status: BookingStatus;
-  source: "live" | "demo" | "seed";
+  source: BookingSource;
   completed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 };
 
-type JobRow = {
+export type PendingJob = {
   id: string;
+  business_id: string;
   booking_id: string;
   type: JobType;
   run_at: Date;
@@ -31,6 +74,7 @@ type JobRow = {
 
 type MessageRow = {
   id: string;
+  business_id: string;
   booking_id: string;
   kind: MessageKind;
   delivery_mode: EmailMode;
@@ -43,9 +87,58 @@ type MessageRow = {
   created_at: Date;
 };
 
+export type DashboardSnapshot = {
+  business: Business;
+  leads: Lead[];
+  bookings: Booking[];
+  activity: MessageLog[];
+  plans: typeof planCatalog;
+};
+
+function parseSettings(value: BusinessSettings | string): BusinessSettings {
+  if (typeof value === "string") {
+    return JSON.parse(value) as BusinessSettings;
+  }
+  return value;
+}
+
+function mapBusiness(row: BusinessRow): Business {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    type: row.type,
+    currentPlan: row.current_plan,
+    supportEmail: row.support_email,
+    settings: parseSettings(row.settings_json),
+    bookingLink: "",
+    leadLink: "",
+    adminLink: "",
+    services: parseSettings(row.settings_json).services,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function mapLead(row: LeadRow): Lead {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    status: row.status,
+    source: row.source,
+    convertedBookingId: row.converted_booking_id,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
 function mapBooking(row: BookingRow): Booking {
   return {
     id: row.id,
+    businessId: row.business_id,
     name: row.name,
     email: row.email,
     phone: row.phone,
@@ -55,13 +148,14 @@ function mapBooking(row: BookingRow): Booking {
     source: row.source,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
-    completedAt: row.completed_at ? row.completed_at.toISOString() : null
+    completedAt: row.completed_at ? row.completed_at.toISOString() : null,
   };
 }
 
 function mapMessage(row: MessageRow): MessageLog {
   return {
     id: row.id,
+    businessId: row.business_id,
     bookingId: row.booking_id,
     kind: row.kind,
     deliveryMode: row.delivery_mode,
@@ -71,41 +165,151 @@ function mapMessage(row: MessageRow): MessageLog {
     sentAt: row.sent_at ? row.sent_at.toISOString() : null,
     providerMessageId: row.provider_message_id,
     error: row.error,
-    createdAt: row.created_at.toISOString()
+    createdAt: row.created_at.toISOString(),
   };
 }
 
 export class Repository {
   constructor(private readonly db: DatabaseClient) {}
 
-  async insertBooking(input: {
+  async insertBusiness(input: {
+    name: string;
+    slug: string;
+    type: BusinessType;
+    adminPasscodeHash: string;
+    supportEmail: string;
+    settings: BusinessSettings;
+    currentPlan?: PlanTier;
+  }) {
+    const result = await this.db.query<BusinessRow>(
+      `insert into businesses (id, name, slug, type, admin_passcode_hash, support_email, current_plan, settings_json)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       returning *`,
+      [
+        randomUUID(),
+        input.name,
+        input.slug,
+        input.type,
+        input.adminPasscodeHash,
+        input.supportEmail,
+        input.currentPlan ?? "starter",
+        JSON.stringify(input.settings),
+      ],
+    );
+    return mapBusiness(result.rows[0]);
+  }
+
+  async getBusinessBySlug(slug: string) {
+    const result = await this.db.query<BusinessRow>("select * from businesses where slug = $1", [slug]);
+    return result.rows[0] ? mapBusiness(result.rows[0]) : null;
+  }
+
+  async getBusinessById(id: string) {
+    const result = await this.db.query<BusinessRow>("select * from businesses where id = $1", [id]);
+    return result.rows[0] ? mapBusiness(result.rows[0]) : null;
+  }
+
+  async getBusinessAuthBySlug(slug: string) {
+    const result = await this.db.query<Pick<BusinessRow, "id" | "slug" | "admin_passcode_hash">>(
+      "select id, slug, admin_passcode_hash from businesses where slug = $1",
+      [slug],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async slugExists(slug: string) {
+    const result = await this.db.query<{ exists: boolean }>("select exists(select 1 from businesses where slug = $1) as exists", [slug]);
+    return Boolean(result.rows[0]?.exists);
+  }
+
+  async insertLead(input: {
+    businessId: string;
     name: string;
     email: string;
     phone: string;
-    service: "haircut" | "facial";
+    source?: LeadSource;
+  }) {
+    const result = await this.db.query<LeadRow>(
+      `insert into leads (id, business_id, name, email, phone, status, source)
+       values ($1, $2, $3, $4, $5, 'new', $6)
+       returning *`,
+      [randomUUID(), input.businessId, input.name, input.email, input.phone, input.source ?? "public"],
+    );
+    return mapLead(result.rows[0]);
+  }
+
+  async listLeadsByBusiness(businessId: string) {
+    const result = await this.db.query<LeadRow>(
+      "select * from leads where business_id = $1 order by created_at desc",
+      [businessId],
+    );
+    return result.rows.map(mapLead);
+  }
+
+  async findOpenLeadForConversion(businessId: string, email: string, phone: string) {
+    const result = await this.db.query<LeadRow>(
+      `select * from leads
+       where business_id = $1
+         and status = 'new'
+         and converted_booking_id is null
+         and (lower(email) = lower($2) or phone = $3)
+       order by created_at desc
+       limit 1`,
+      [businessId, email, phone],
+    );
+    return result.rows[0] ? mapLead(result.rows[0]) : null;
+  }
+
+  async markLeadConverted(leadId: string, bookingId: string) {
+    await this.db.query(
+      `update leads
+       set status = 'converted',
+           converted_booking_id = $2,
+           updated_at = now()
+       where id = $1`,
+      [leadId, bookingId],
+    );
+  }
+
+  async insertBooking(input: {
+    businessId: string;
+    name: string;
+    email: string;
+    phone: string;
+    service: string;
     scheduledAt: Date;
-    source: "live" | "demo" | "seed";
+    source: BookingSource;
     status?: BookingStatus;
   }) {
     const result = await this.db.query<BookingRow>(
-      `insert into bookings (id, name, email, phone, service, scheduled_at, status, source)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
+      `insert into bookings (id, business_id, name, email, phone, service, scheduled_at, status, source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        returning *`,
-      [randomUUID(), input.name, input.email, input.phone, input.service, input.scheduledAt, input.status ?? "confirmed", input.source]
+      [
+        randomUUID(),
+        input.businessId,
+        input.name,
+        input.email,
+        input.phone,
+        input.service,
+        input.scheduledAt,
+        input.status ?? "confirmed",
+        input.source,
+      ],
     );
     return mapBooking(result.rows[0]);
   }
 
-  async updateBookingStatus(id: string, status: BookingStatus) {
+  async updateBookingStatus(businessId: string, id: string, status: BookingStatus) {
     const completedAt = status === "completed" ? new Date() : null;
     const result = await this.db.query<BookingRow>(
       `update bookings
-       set status = $2,
-           completed_at = case when $2 = 'completed' then coalesce(completed_at, $3) else completed_at end,
+       set status = $3,
+           completed_at = case when $3 = 'completed' then coalesce(completed_at, $4) else completed_at end,
            updated_at = now()
-       where id = $1
+       where id = $1 and business_id = $2
        returning *`,
-      [id, status, completedAt]
+      [id, businessId, status, completedAt],
     );
     return result.rows[0] ? mapBooking(result.rows[0]) : null;
   }
@@ -115,77 +319,76 @@ export class Repository {
     return result.rows[0] ? mapBooking(result.rows[0]) : null;
   }
 
-  async listBookings() {
-    const result = await this.db.query<BookingRow>("select * from bookings order by scheduled_at asc, created_at desc");
+  async listBookingsByBusiness(businessId: string) {
+    const result = await this.db.query<BookingRow>(
+      "select * from bookings where business_id = $1 order by scheduled_at desc, created_at desc",
+      [businessId],
+    );
     return result.rows.map(mapBooking);
   }
 
-  async listActivity(limit = 20) {
+  async listActivityByBusiness(businessId: string, limit = 20) {
     const result = await this.db.query<MessageRow>(
-      "select * from message_log order by coalesce(sent_at, created_at) desc, created_at desc limit $1",
-      [limit]
+      `select * from message_log
+       where business_id = $1
+       order by coalesce(sent_at, created_at) desc, created_at desc
+       limit $2`,
+      [businessId, limit],
     );
     return result.rows.map(mapMessage);
   }
 
-  async countMonthlyBookings(monthStart: Date) {
-    const result = await this.db.query<{ count: string }>(
-      "select count(*)::text as count from bookings where created_at >= $1",
-      [monthStart]
-    );
-    return Number(result.rows[0]?.count ?? 0);
-  }
-
-  async countActiveAutomations() {
-    const result = await this.db.query<{ count: string }>(
-      "select count(*)::text as count from jobs where status in ('pending', 'running')"
-    );
-    return Number(result.rows[0]?.count ?? 0);
-  }
-
-  async ensurePendingJob(bookingId: string, type: JobType, runAt: Date, payload: Record<string, unknown> = {}) {
+  async ensurePendingJob(
+    businessId: string,
+    bookingId: string,
+    type: JobType,
+    runAt: Date,
+    payload: Record<string, unknown> = {},
+  ) {
     const existing = await this.db.query<{ id: string }>(
       "select id from jobs where booking_id = $1 and type = $2 and status in ('pending', 'running') limit 1",
-      [bookingId, type]
+      [bookingId, type],
     );
     if (existing.rows[0]) {
       return false;
     }
 
     await this.db.query(
-      `insert into jobs (id, booking_id, type, run_at, payload_json)
-       values ($1, $2, $3, $4, $5::jsonb)`,
-      [randomUUID(), bookingId, type, runAt, JSON.stringify(payload)]
+      `insert into jobs (id, business_id, booking_id, type, run_at, payload_json)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [randomUUID(), businessId, bookingId, type, runAt, JSON.stringify(payload)],
     );
     return true;
   }
 
   async getNextPendingJob() {
-    const result = await this.db.query<JobRow>("select * from jobs where status = 'pending' order by run_at asc limit 1");
+    const result = await this.db.query<PendingJob>("select * from jobs where status = 'pending' order by run_at asc limit 1");
     return result.rows[0] ?? null;
   }
 
   async listJobs() {
-    const result = await this.db.query<JobRow>("select * from jobs order by run_at asc, created_at asc");
+    const result = await this.db.query<PendingJob>("select * from jobs order by run_at asc, created_at asc");
     return result.rows;
   }
 
   async claimNextDueJob(now = new Date()) {
     const next = await this.db.query<{ id: string }>(
       "select id from jobs where status = 'pending' and run_at <= $1 order by run_at asc limit 1",
-      [now]
+      [now],
     );
     const jobId = next.rows[0]?.id;
     if (!jobId) {
       return null;
     }
 
-    const claimed = await this.db.query<JobRow>(
+    const claimed = await this.db.query<PendingJob>(
       `update jobs
-       set status = 'running', attempts = attempts + 1, updated_at = now()
+       set status = 'running',
+           attempts = attempts + 1,
+           updated_at = now()
        where id = $1 and status = 'pending'
        returning *`,
-      [jobId]
+      [jobId],
     );
     return claimed.rows[0] ?? null;
   }
@@ -195,6 +398,7 @@ export class Repository {
   }
 
   async upsertMessageLog(input: {
+    businessId: string;
     bookingId: string;
     kind: MessageKind;
     deliveryMode: EmailMode;
@@ -206,10 +410,11 @@ export class Repository {
     error?: string | null;
   }) {
     const result = await this.db.query<MessageRow>(
-      `insert into message_log (id, booking_id, kind, delivery_mode, status, subject, to_email, sent_at, provider_message_id, error)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `insert into message_log (id, business_id, booking_id, kind, delivery_mode, status, subject, to_email, sent_at, provider_message_id, error)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        on conflict (booking_id, kind) do update
-         set delivery_mode = excluded.delivery_mode,
+         set business_id = excluded.business_id,
+             delivery_mode = excluded.delivery_mode,
              status = excluded.status,
              subject = excluded.subject,
              to_email = excluded.to_email,
@@ -219,6 +424,7 @@ export class Repository {
        returning *`,
       [
         randomUUID(),
+        input.businessId,
         input.bookingId,
         input.kind,
         input.deliveryMode,
@@ -227,48 +433,30 @@ export class Repository {
         input.toEmail,
         input.sentAt,
         input.providerMessageId ?? null,
-        input.error ?? null
-      ]
+        input.error ?? null,
+      ],
     );
     return mapMessage(result.rows[0]);
   }
 
-  async clearAllData() {
-    await this.db.query("delete from message_log");
-    await this.db.query("delete from jobs");
-    await this.db.query("delete from bookings");
-  }
-
-  async getDashboardPayload() {
-    const monthStart = new Date();
-    monthStart.setUTCDate(1);
-    monthStart.setUTCHours(0, 0, 0, 0);
-
-    const [bookings, activity, monthlyBookingsUsed, activeAutomations] = await Promise.all([
-      this.listBookings(),
-      this.listActivity(),
-      this.countMonthlyBookings(monthStart),
-      this.countActiveAutomations()
+  async getDashboardSnapshot(businessId: string): Promise<DashboardSnapshot | null> {
+    const [business, leads, bookings, activity] = await Promise.all([
+      this.getBusinessById(businessId),
+      this.listLeadsByBusiness(businessId),
+      this.listBookingsByBusiness(businessId),
+      this.listActivityByBusiness(businessId),
     ]);
 
-    const currentPlan = planCatalog.find((plan) => plan.tier === demoBusiness.currentPlan) ?? planCatalog[0];
+    if (!business) {
+      return null;
+    }
+
     return {
-      business: {
-        name: demoBusiness.name,
-        slug: demoBusiness.slug,
-        services: [...demoBusiness.services],
-        currentPlan: demoBusiness.currentPlan,
-        supportEmail: demoBusiness.supportEmail
-      },
+      business,
+      leads,
       bookings,
       activity,
       plans: planCatalog,
-      metrics: {
-        monthlyBookingsUsed,
-        monthlyBookingsLimit: currentPlan.bookingLimit,
-        activeAutomations,
-        automationLimit: currentPlan.automationLimit
-      }
     };
   }
 }

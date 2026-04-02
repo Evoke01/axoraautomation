@@ -1,10 +1,102 @@
-import { bookingInputSchema, demoBusiness, type Booking, type BookingInput, type BookingStatus, type JobType, type MessageKind } from "@business-automation/shared";
+import {
+  adminLoginSchema,
+  bookingInputSchema,
+  bookingStatusSchema,
+  businessCreateInputSchema,
+  businessPresets,
+  leadInputSchema,
+  planCatalog,
+  type Booking,
+  type BookingInput,
+  type BookingStatus,
+  type Business,
+  type BusinessCreateInput,
+  type BusinessCreateResult,
+  type BusinessIdentity,
+  type BusinessType,
+  type DashboardPayload,
+  type JobType,
+  type LeadInput,
+  type MessageKind,
+  type PublicConfig,
+} from "@business-automation/shared";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import type { EmailService } from "./email.js";
-import type { Repository } from "./repository.js";
+import type { PendingJob, Repository } from "./repository.js";
 import type { Scheduler } from "./scheduler.js";
 
-type BookingSource = "live" | "demo" | "seed";
+type HttpError = Error & { statusCode?: number };
+
+function createHttpError(statusCode: number, message: string) {
+  const error = new Error(message) as HttpError;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function slugify(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "business";
+}
+
+function generatePasscode(type: BusinessType) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = type === "salon" ? "SLN-" : "GYM-";
+  const bytes = randomBytes(6);
+  for (const byte of bytes) {
+    code += alphabet[byte % alphabet.length];
+  }
+  return code;
+}
+
+function hashPasscode(passcode: string) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(passcode, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPasscode(passcode: string, storedHash: string) {
+  const [salt, hash] = storedHash.split(":");
+  if (!salt || !hash) {
+    return false;
+  }
+  const derived = scryptSync(passcode, salt, 64);
+  const stored = Buffer.from(hash, "hex");
+  if (stored.length !== derived.length) {
+    return false;
+  }
+  return timingSafeEqual(stored, derived);
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function startOfUtcWeek(date: Date) {
+  const start = startOfUtcDay(date);
+  const day = start.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  start.setUTCDate(start.getUTCDate() + diff);
+  return start;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
 
 export class BookingService {
   private scheduler: Scheduler | null = null;
@@ -12,7 +104,7 @@ export class BookingService {
   constructor(
     private readonly repository: Repository,
     private readonly emailService: EmailService,
-    private readonly appConfig: AppConfig
+    private readonly appConfig: AppConfig,
   ) {}
 
   attachScheduler(scheduler: Scheduler) {
@@ -20,207 +112,270 @@ export class BookingService {
   }
 
   async ensureSeedData() {
-    const current = await this.repository.listBookings();
-    if (current.length === 0) {
-      await this.seedDemoData();
-    }
+    return;
   }
 
-  async seedDemoData() {
-    await this.repository.clearAllData();
-
-    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    tomorrow.setUTCHours(10, 30, 0, 0);
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    yesterday.setUTCHours(12, 0, 0, 0);
-    const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    lastWeek.setUTCHours(15, 30, 0, 0);
-
-    const confirmed = await this.repository.insertBooking({
-      name: "Alicia Brown",
-      email: "alicia@example.com",
-      phone: "+91 98765 43210",
-      service: "haircut",
-      scheduledAt: tomorrow,
-      source: "seed"
+  async createBusiness(rawInput: BusinessCreateInput): Promise<BusinessCreateResult> {
+    const input = businessCreateInputSchema.parse(rawInput);
+    const slug = await this.generateUniqueSlug(input.name);
+    const generatedPasscode = generatePasscode(input.type);
+    const business = await this.repository.insertBusiness({
+      name: input.name,
+      slug,
+      type: input.type,
+      adminPasscodeHash: hashPasscode(generatedPasscode),
+      supportEmail: this.appConfig.SUPPORT_EMAIL,
+      settings: structuredClone(businessPresets[input.type]),
+      currentPlan: "starter",
     });
 
-    const completed = await this.repository.insertBooking({
-      name: "Mira Kapoor",
-      email: "mira@example.com",
-      phone: "+91 99887 66554",
-      service: "facial",
-      scheduledAt: yesterday,
-      source: "seed",
-      status: "completed"
-    });
-
-    const noShow = await this.repository.insertBooking({
-      name: "Jordan Lee",
-      email: "jordan@example.com",
-      phone: "+91 90011 22334",
-      service: "haircut",
-      scheduledAt: lastWeek,
-      source: "seed",
-      status: "no_show"
-    });
-
-    await this.repository.upsertMessageLog({
-      bookingId: confirmed.id,
-      kind: "confirmation",
-      deliveryMode: "demo",
-      status: "sent",
-      subject: "haircut booked at Demo Salon",
-      toEmail: confirmed.email,
-      sentAt: new Date(),
-      providerMessageId: "seed-confirmed"
-    });
-
-    await this.repository.upsertMessageLog({
-      bookingId: completed.id,
-      kind: "follow_up",
-      deliveryMode: "demo",
-      status: "sent",
-      subject: "How was your facial at Demo Salon?",
-      toEmail: completed.email,
-      sentAt: new Date(),
-      providerMessageId: "seed-follow-up"
-    });
-
-    await this.repository.upsertMessageLog({
-      bookingId: noShow.id,
-      kind: "confirmation",
-      deliveryMode: "demo",
-      status: "sent",
-      subject: "haircut booked at Demo Salon",
-      toEmail: noShow.email,
-      sentAt: new Date(),
-      providerMessageId: "seed-no-show"
-    });
-
-    await this.scheduler?.notifyChange();
+    const identity = this.toBusinessIdentity(business);
+    return {
+      business: identity,
+      generatedPasscode,
+      bookingLink: identity.bookingLink,
+      leadLink: identity.leadLink,
+      adminLink: identity.adminLink,
+    };
   }
 
-  async createBooking(rawInput: BookingInput, source: BookingSource = "live") {
-    const input = bookingInputSchema.parse(rawInput);
-    const booking = await this.repository.insertBooking({
+  async getPublicConfig(businessSlug: string): Promise<PublicConfig> {
+    const business = await this.getBusinessOrThrow(businessSlug);
+    return {
+      business: this.toBusinessIdentity(business),
+      plans: planCatalog,
+    };
+  }
+
+  async createLead(businessSlug: string, rawInput: LeadInput) {
+    const business = await this.getBusinessOrThrow(businessSlug);
+    const input = leadInputSchema.parse(rawInput);
+    return this.repository.insertLead({
+      businessId: business.id,
       name: input.name,
       email: input.email,
       phone: input.phone,
-      service: input.service,
+      source: "public",
+    });
+  }
+
+  async createBooking(businessSlug: string, rawInput: BookingInput) {
+    const business = await this.getBusinessOrThrow(businessSlug);
+    const input = bookingInputSchema.parse(rawInput);
+    const serviceName = this.resolveServiceName(input.service, business);
+    const matchedLead = await this.repository.findOpenLeadForConversion(business.id, input.email, input.phone);
+
+    const booking = await this.repository.insertBooking({
+      businessId: business.id,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      service: serviceName,
       scheduledAt: new Date(input.scheduledAt),
-      source
+      source: matchedLead ? "lead" : "public",
     });
 
-    await this.sendAndLog("confirmation", booking);
-    await this.scheduleInitialJobs(booking.id, booking.scheduledAt, source);
+    if (matchedLead) {
+      await this.repository.markLeadConverted(matchedLead.id, booking.id);
+    }
+
+    await this.sendAndLog("confirmation", booking, business);
+    await this.scheduleReminder(booking, business);
     await this.scheduler?.notifyChange();
     return booking;
   }
 
-  async updateStatus(bookingId: string, status: BookingStatus) {
-    const booking = await this.repository.updateBookingStatus(bookingId, status);
+  async loginBusinessAdmin(businessSlug: string, passcode: string) {
+    const input = adminLoginSchema.parse({ passcode });
+    const auth = await this.repository.getBusinessAuthBySlug(businessSlug);
+    if (!auth || !verifyPasscode(input.passcode, auth.admin_passcode_hash)) {
+      throw createHttpError(401, "Invalid admin passcode.");
+    }
+
+    return auth.slug;
+  }
+
+  async updateStatus(businessSlug: string, bookingId: string, statusInput: BookingStatus) {
+    const business = await this.getBusinessOrThrow(businessSlug);
+    const status = bookingStatusSchema.parse(statusInput);
+    const booking = await this.repository.updateBookingStatus(business.id, bookingId, status);
     if (!booking) {
       return null;
     }
 
     if (status === "completed") {
-      await this.scheduleFollowUp(booking.id, booking.source);
+      await this.scheduleFollowUp(booking, business);
       await this.scheduler?.notifyChange();
     }
 
     return booking;
   }
 
-  async runDemoFlow() {
-    return this.createBooking(
-      {
-        name: "Maya Patel",
-        email: "maya.demo@example.com",
-        phone: "+91 98989 45454",
-        service: "facial",
-        scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString()
-      },
-      "demo"
-    );
-  }
-
-  async handleJob(job: { booking_id: string; type: JobType }) {
+  async handleJob(job: Pick<PendingJob, "booking_id" | "business_id" | "type">) {
     const booking = await this.repository.getBookingById(job.booking_id);
     if (!booking) {
+      return;
+    }
+
+    const business = await this.repository.getBusinessById(job.business_id);
+    if (!business) {
       return;
     }
 
     switch (job.type) {
       case "reminder":
         if (booking.status === "cancelled" || booking.status === "no_show") {
-          await this.logSkipped("reminder", booking.id, booking.email, "Reminder skipped because booking is inactive.");
+          await this.logSkipped("reminder", booking, business, "Reminder skipped because booking is inactive.");
           return;
         }
-        await this.sendAndLog("reminder", booking);
-        return;
-      case "demo_complete":
-        if (booking.status === "confirmed") {
-          await this.updateStatus(booking.id, "completed");
-        }
+        await this.sendAndLog("reminder", booking, business);
         return;
       case "follow_up":
         if (booking.status !== "completed") {
-          await this.logSkipped("follow_up", booking.id, booking.email, "Follow-up skipped because booking is not completed.");
+          await this.logSkipped("follow_up", booking, business, "Follow-up skipped because booking is not completed.");
           return;
         }
-        await this.sendAndLog("follow_up", booking);
-        await this.scheduleReengagement(booking.id, booking.source);
+        await this.sendAndLog("follow_up", booking, business);
+        await this.scheduleReengagement(booking, business);
         await this.scheduler?.notifyChange();
         return;
       case "reengagement":
         if (booking.status !== "completed") {
-          await this.logSkipped("reengagement", booking.id, booking.email, "Re-engagement skipped because booking is not completed.");
+          await this.logSkipped("reengagement", booking, business, "Re-engagement skipped because booking is not completed.");
           return;
         }
-        await this.sendAndLog("reengagement", booking);
+        await this.sendAndLog("reengagement", booking, business);
         return;
       default:
         return;
     }
   }
 
-  async getDashboard() {
-    return this.repository.getDashboardPayload();
-  }
-
-  private async scheduleInitialJobs(bookingId: string, scheduledAt: string, source: BookingSource) {
-    const now = Date.now();
-    const reminderAt = source === "demo"
-      ? new Date(now + this.appConfig.DEMO_REMINDER_MS)
-      : new Date(new Date(scheduledAt).getTime() - this.appConfig.LIVE_REMINDER_HOURS * 60 * 60 * 1000);
-
-    if (reminderAt.getTime() > now) {
-      await this.repository.ensurePendingJob(bookingId, "reminder", reminderAt);
+  async getDashboard(businessSlug: string): Promise<DashboardPayload> {
+    const business = await this.getBusinessOrThrow(businessSlug);
+    const snapshot = await this.repository.getDashboardSnapshot(business.id);
+    if (!snapshot) {
+      throw createHttpError(404, "Business not found.");
     }
 
-    if (source === "demo") {
-      await this.repository.ensurePendingJob(bookingId, "demo_complete", new Date(now + this.appConfig.DEMO_AUTO_COMPLETE_MS));
+    const now = new Date();
+    const todayStart = startOfUtcDay(now);
+    const tomorrowStart = addDays(todayStart, 1);
+    const weekStart = startOfUtcWeek(now);
+    const nextWeekStart = addDays(weekStart, 7);
+
+    const bookingsToday = snapshot.bookings.filter((booking) => {
+      const scheduledAt = new Date(booking.scheduledAt);
+      return scheduledAt >= todayStart && scheduledAt < tomorrowStart;
+    }).length;
+
+    const bookingsThisWeek = snapshot.bookings.filter((booking) => {
+      const scheduledAt = new Date(booking.scheduledAt);
+      return scheduledAt >= weekStart && scheduledAt < nextWeekStart;
+    }).length;
+
+    const noShows = snapshot.bookings.filter((booking) => booking.status === "no_show").length;
+    const convertedLeads = snapshot.leads.filter((lead) => lead.convertedBookingId).length;
+    const totalLeads = snapshot.leads.length;
+    const conversionRate = totalLeads === 0 ? 0 : convertedLeads / totalLeads;
+
+    return {
+      business: this.toBusinessIdentity(snapshot.business),
+      impact: {
+        bookingsToday,
+        bookingsThisWeek,
+        noShows,
+        conversionRate,
+        conversionRateLabel: formatPercent(conversionRate),
+      },
+      leadSummary: {
+        totalLeads,
+        convertedLeads,
+        openLeads: totalLeads - convertedLeads,
+      },
+      bookings: snapshot.bookings,
+      activity: snapshot.activity,
+      plans: snapshot.plans,
+    };
+  }
+
+  private async generateUniqueSlug(name: string) {
+    const base = slugify(name);
+    let candidate = base;
+    let counter = 2;
+
+    while (await this.repository.slugExists(candidate)) {
+      candidate = `${base}-${counter}`;
+      counter += 1;
     }
+
+    return candidate;
   }
 
-  private async scheduleFollowUp(bookingId: string, source: BookingSource) {
-    const delayMs = source === "demo"
-      ? this.appConfig.DEMO_FOLLOW_UP_MS
-      : this.appConfig.LIVE_FOLLOW_UP_HOURS * 60 * 60 * 1000;
-    await this.repository.ensurePendingJob(bookingId, "follow_up", new Date(Date.now() + delayMs));
+  private async getBusinessOrThrow(businessSlug: string) {
+    const business = await this.repository.getBusinessBySlug(businessSlug);
+    if (!business) {
+      throw createHttpError(404, "Business not found.");
+    }
+    return business;
   }
 
-  private async scheduleReengagement(bookingId: string, source: BookingSource) {
-    const delayMs = source === "demo"
-      ? this.appConfig.DEMO_REENGAGEMENT_MS
-      : this.appConfig.LIVE_REENGAGEMENT_DAYS * 24 * 60 * 60 * 1000;
-    await this.repository.ensurePendingJob(bookingId, "reengagement", new Date(Date.now() + delayMs));
+  private toBusinessIdentity(business: Business): BusinessIdentity {
+    const baseUrl = this.appConfig.APP_BASE_URL.replace(/\/$/, "");
+    return {
+      id: business.id,
+      name: business.name,
+      slug: business.slug,
+      type: business.type,
+      currentPlan: business.currentPlan,
+      supportEmail: business.supportEmail,
+      services: [...business.settings.services],
+      settings: business.settings,
+      bookingLink: `${baseUrl}/book/${business.slug}`,
+      leadLink: `${baseUrl}/lead/${business.slug}`,
+      adminLink: `${baseUrl}/admin/${business.slug}`,
+    };
   }
 
-  private async sendAndLog(kind: MessageKind, booking: Booking) {
-    const delivery = await this.emailService.send(kind, booking);
+  private resolveServiceName(service: string, business: Business) {
+    const match = business.settings.services.find(
+      (candidate) => candidate.toLowerCase() === service.trim().toLowerCase(),
+    );
+
+    if (!match) {
+      throw createHttpError(400, `Service "${service}" is not available for ${business.name}.`);
+    }
+
+    return match;
+  }
+
+  private async scheduleReminder(booking: Booking, business: Business) {
+    const reminderAt = addHours(new Date(booking.scheduledAt), -business.settings.reminderHours);
+    if (reminderAt.getTime() <= Date.now()) {
+      return;
+    }
+
+    await this.repository.ensurePendingJob(business.id, booking.id, "reminder", reminderAt);
+  }
+
+  private async scheduleFollowUp(booking: Booking, business: Business) {
+    const start = booking.completedAt ? new Date(booking.completedAt) : new Date();
+    const runAt = addHours(start, business.settings.followUpHours);
+    await this.repository.ensurePendingJob(business.id, booking.id, "follow_up", runAt);
+  }
+
+  private async scheduleReengagement(booking: Booking, business: Business) {
+    const runAt = addDays(new Date(), business.settings.reengagementDays);
+    await this.repository.ensurePendingJob(business.id, booking.id, "reengagement", runAt);
+  }
+
+  private async sendAndLog(kind: MessageKind, booking: Booking, business: Business) {
+    const delivery = await this.emailService.send(kind, booking, {
+      businessName: business.name,
+      businessType: business.type,
+    });
     await this.repository.upsertMessageLog({
+      businessId: business.id,
       bookingId: booking.id,
       kind,
       deliveryMode: delivery.deliveryMode,
@@ -229,20 +384,21 @@ export class BookingService {
       toEmail: booking.email,
       sentAt: delivery.status === "sent" ? new Date() : null,
       providerMessageId: delivery.providerMessageId ?? null,
-      error: delivery.error ?? null
+      error: delivery.error ?? null,
     });
   }
 
-  private async logSkipped(kind: MessageKind, bookingId: string, toEmail: string, reason: string) {
+  private async logSkipped(kind: MessageKind, booking: Booking, business: Business, reason: string) {
     await this.repository.upsertMessageLog({
-      bookingId,
+      businessId: business.id,
+      bookingId: booking.id,
       kind,
       deliveryMode: this.appConfig.EMAIL_MODE,
       status: "skipped",
-      subject: `${demoBusiness.name} skipped ${kind.replace("_", " ")}`,
-      toEmail,
+      subject: `${business.name} skipped ${kind.replace("_", " ")}`,
+      toEmail: booking.email,
       sentAt: null,
-      error: reason
+      error: reason,
     });
   }
 }

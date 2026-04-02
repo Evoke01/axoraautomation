@@ -16,8 +16,6 @@ services:
         sync: false
       - key: APP_BASE_URL
         sync: false
-      - key: ADMIN_PASSCODE
-        sync: false
       - key: SESSION_SECRET
         sync: false
       - key: EMAIL_MODE
@@ -28,17 +26,3 @@ services:
         sync: false
       - key: SUPPORT_EMAIL
         sync: false
-      - key: LIVE_REMINDER_HOURS
-        value: "24"
-      - key: LIVE_FOLLOW_UP_HOURS
-        value: "24"
-      - key: LIVE_REENGAGEMENT_DAYS
-        value: "7"
-      - key: DEMO_REMINDER_MS
-        value: "10000"
-      - key: DEMO_AUTO_COMPLETE_MS
-        value: "15000"
-      - key: DEMO_FOLLOW_UP_MS
-        value: "5000"
-      - key: DEMO_REENGAGEMENT_MS
-        value: "10000"

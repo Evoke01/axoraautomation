@@ -3,6 +3,7 @@ import type { Repository } from "./repository.js";
 
 type JobHandler = (job: {
   id: string;
+  business_id: string;
   booking_id: string;
   type: JobType;
   run_at: Date;

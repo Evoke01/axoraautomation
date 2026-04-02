@@ -3,14 +3,14 @@ import { MemoryRouter } from "react-router-dom";
 import { expect, test } from "vitest";
 import App from "./App";
 
-test("renders pricing navigation hook", () => {
+test("renders the get started onboarding flow", () => {
   render(
-    <MemoryRouter initialEntries={["/pricing"]}>
+    <MemoryRouter initialEntries={["/start"]}>
       <App />
     </MemoryRouter>,
   );
 
-  expect(screen.getByText(/pricing hooks/i)).toBeInTheDocument();
-  expect(screen.getByText("$29/mo")).toBeInTheDocument();
-  expect(screen.getByText(/talk to sales/i)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /create a business, generate the slug/i })).toBeInTheDocument();
+  expect(screen.getByLabelText(/business name/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /create business/i })).toBeInTheDocument();
 });

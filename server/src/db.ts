@@ -14,6 +14,8 @@ const schemaPath = resolve(currentDir, "../sql/schema.sql");
 export function createPool(connectionString: string) {
   return new Pool({
     connectionString,
+    // Keep the pool small for free-tier hosted environments like Render + Supabase.
+    max: 5,
     ssl: connectionString.includes("localhost") ? false : { rejectUnauthorized: false }
   });
 }

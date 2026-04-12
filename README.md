@@ -1,138 +1,46 @@
-# Business Automation MVP
+# Axora
 
-Minimal full-stack business automation core for salons and gyms. This repo is isolated from the existing `New project` repo and is meant to be the reusable system that future wrapper sites sit on top of.
+Axora is an autonomous content distribution backend for creator video assets. This repository now contains:
 
-## What it does
+- `backend/`: the TypeScript backend foundation for uploads, validation, planning, review gating, BullMQ orchestration, YouTube connection flow, metrics polling, optimization snapshots, and weekly opportunity reporting
+- `frontend/`: existing placeholder frontend code that has not yet been rebuilt for Axora
 
-- Public onboarding flow at `/start`
-  - create a business from `name + type`
-  - generate a unique slug
-  - generate a business-specific admin passcode
-  - return lead, booking, and admin links
-- Public funnel routes
-  - `/lead/:businessSlug`
-  - `/book/:businessSlug`
-  - `/admin/:businessSlug`
-- Impact-first dashboard
-  - bookings today
-  - bookings this week
-  - no-shows
-  - conversion rate from leads to bookings
-- Event-based automation
-  - confirmation email on booking
-  - reminder before the visit
-  - follow-up after completion
-  - re-engagement after the configured delay
+## Backend stack
 
-No cron jobs are used. Delayed work is stored in Postgres and executed by one in-process scheduler timer.
+- Fastify + TypeScript
+- Prisma + PostgreSQL
+- BullMQ + Redis
+- S3-compatible object storage for raw assets
+- YouTube OAuth + publishing adapter
 
-## Stack
+## Backend setup
 
-- Frontend: React 19, Vite, React Router
-- Backend: Node.js, Express, TypeScript
-- Database: Supabase Postgres via `pg`
-- Email: Resend in `live` mode, DB-visible mock sends in `demo` mode
-- Tests: Vitest, Testing Library, Supertest, pg-mem
-
-## Repo layout
-
-- `client/`: landing page, onboarding flow, public lead/booking pages, admin dashboard
-- `server/`: API, scheduler, DB layer, email handling, tests
-- `shared/`: Zod schemas and shared contracts
-
-## Local setup
-
-1. Copy `.env.example` to `.env`.
-2. Set `DATABASE_URL` to a Postgres database.
+1. Copy `backend/.env.example` to `backend/.env`.
+2. Provision PostgreSQL, Redis, and an S3-compatible bucket.
 3. Install dependencies:
+   `cd backend && npm install`
+4. Generate Prisma client:
+   `npm run prisma:generate`
+5. Apply your database schema:
+   `npm run prisma:push`
+6. Start the backend:
+   `npm run dev`
 
-```bash
-npm install
-```
+## Key backend flows
 
-4. Start development mode:
+- Direct multipart asset upload initialization and completion
+- Hard asset validation with MIME sniffing and `ffprobe`
+- Metadata generation and campaign planning
+- Tier-based review gating
+- YouTube publishing with token refresh and quota reservation
+- Metrics snapshot polling and optimization recompute
+- Weekly opportunity report generation
+- Audit retention cleanup
 
-```bash
-npm run dev
-```
+## Verification
 
-That runs:
+Backend checks completed:
 
-- shared package watch
-- Express API on `http://localhost:4000`
-- Vite frontend on `http://localhost:5173`
-
-## Core routes
-
-- Public app:
-  - `/`
-  - `/start`
-  - `/pricing`
-  - `/lead/:businessSlug`
-  - `/book/:businessSlug`
-  - `/admin/:businessSlug`
-- API:
-  - `POST /api/businesses`
-  - `GET /api/public-config/:businessSlug`
-  - `POST /api/leads/:businessSlug`
-  - `POST /api/bookings/:businessSlug`
-  - `POST /api/admin/:businessSlug/login`
-  - `POST /api/admin/:businessSlug/logout`
-  - `GET /api/admin/:businessSlug/dashboard`
-  - `PATCH /api/admin/:businessSlug/bookings/:bookingId/status`
-  - `GET /api/health`
-
-## Free production setup
-
-This repo is configured for a zero-cost MVP stack:
-
-- Hosting: Render Free web service
-- Database: Supabase Free Postgres
-- Email: Resend Free
-
-### Supabase
-
-1. Create a free Supabase project.
-2. Open the database connection settings.
-3. Copy the `Session pooler` connection string.
-4. Use that value as `DATABASE_URL` locally and in Render.
-
-Supabase is used as hosted Postgres only in this phase. There is no Supabase Auth, RLS, or Edge Function usage here.
-
-### Render
-
-1. Connect this repo to Render.
-2. Use the included `render.yaml` Blueprint or create one free Node web service manually.
-3. Set these env vars:
-   - `DATABASE_URL`
-   - `CLIENT_ORIGIN`
-   - `APP_BASE_URL`
-   - `SESSION_SECRET`
-   - `EMAIL_MODE`
-   - `RESEND_API_KEY`
-   - `RESEND_FROM_EMAIL`
-   - `SUPPORT_EMAIL`
-4. Keep `CLIENT_ORIGIN` and `APP_BASE_URL` pointed at the same Render URL for the single-service deployment.
-
-Render config in this repo uses:
-
-- build command: `npm install && npm run build`
-- start command: `npm run start`
-- health check: `/api/health`
-
-## Scripts
-
-```bash
-npm run dev
-npm run build
-npm test
-npm run start
-```
-
-## Notes
-
-- Business admin access is lightweight and business-specific. Passcodes are generated when the business is created.
-- Conversion is tracked as `lead -> booking`, not just raw booking submissions.
-- On restart, the scheduler reloads pending jobs from the database.
-- Render Free is acceptable for demos and MVP usage, but sleeping hosts can delay job execution until the process wakes back up.
-- Because the scheduler is in-process, delayed jobs are best-effort on free hosting and run reliably only while the service is awake.
+- `npm run prisma:generate`
+- `npm run build`
+- `npm test`

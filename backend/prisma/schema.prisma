@@ -1,0 +1,533 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  STUDIO
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Platform {
+  YOUTUBE
+  LINKEDIN
+  X
+}
+
+enum ConnectedAccountStatus {
+  ACTIVE
+  REAUTH_REQUIRED
+  DISCONNECTED
+  ERROR
+}
+
+enum UploadSessionStatus {
+  INITIATED
+  UPLOADING
+  COMPLETED
+  FAILED
+  ABORTED
+}
+
+enum AssetStatus {
+  DRAFT
+  VALIDATING
+  READY
+  REJECTED
+  PLANNED
+  PENDING_REVIEW
+  APPROVED
+  PUBLISHING
+  PUBLISHED
+  ARCHIVED
+  FAILED
+}
+
+enum ValidationStatus {
+  PENDING
+  VALID
+  REJECTED
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum WaveStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum DecisionStatus {
+  PENDING
+  SCHEDULED
+  SKIPPED
+  PUBLISHED
+  FAILED
+}
+
+enum ContentFormat {
+  YOUTUBE_VIDEO
+  YOUTUBE_SHORT
+  TEXT_POST
+}
+
+enum PostStatus {
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  ARCHIVED
+}
+
+enum OverrideType {
+  CAPTION
+  SCHEDULE
+  PLATFORM
+  ARCHIVE
+}
+
+enum AuditActorType {
+  SYSTEM
+  USER
+}
+
+enum AuditTargetType {
+  ASSET
+  CAMPAIGN
+  DECISION
+  POST
+  ACCOUNT
+  WORKSPACE
+}
+
+enum AccountHealthSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Workspace {
+  id                 String                 @id @default(cuid())
+  name               String
+  timezone           String                 @default("UTC")
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  memberships        Membership[]
+  entitlements       PlanEntitlement?
+  creators           Creator[]
+  uploadSessions     UploadSession[]
+  assets             Asset[]
+  campaigns          Campaign[]
+  connectedAccounts  ConnectedAccount[]
+  platformPosts      PlatformPost[]
+  quotaLedgers       PlatformQuotaLedger[]
+  optimization       OptimizationSnapshot[]
+  competitorChannels CompetitorChannel[]
+  opportunityReports OpportunityReport[]
+  accountHealth      AccountHealthEvent[]
+  overrides          Override[]
+  auditLogs          AuditLog[]
+  oauthStates        OAuthState[]
+}
+
+model User {
+  id          String       @id @default(cuid())
+  externalId  String       @unique
+  email       String?
+  name        String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+  overrides   Override[]
+}
+
+model Membership {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MembershipRole @default(OWNER)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model PlanEntitlement {
+  id                    String   @id @default(cuid())
+  workspaceId           String   @unique
+  plan                  PlanTier @default(FREE)
+  connectedPlatformLimit Int     @default(1)
+  autoPublishEnabled    Boolean  @default(false)
+  manualReviewRequired  Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Creator {
+  id            String            @id @default(cuid())
+  workspaceId   String
+  name          String
+  brandVoice    String?
+  niche         String?
+  defaultNotes  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedAccounts ConnectedAccount[]
+  assets        Asset[]
+}
+
+model ConnectedAccount {
+  id                   String                 @id @default(cuid())
+  workspaceId          String
+  creatorId            String?
+  platform             Platform
+  accountLabel         String
+  externalAccountId    String?
+  status               ConnectedAccountStatus @default(REAUTH_REQUIRED)
+  accessTokenEncrypted String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt       DateTime?
+  scopes               Json?
+  metadata             Json?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  workspace            Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator              Creator?               @relation(fields: [creatorId], references: [id], onDelete: SetNull)
+  decisions            DistributionDecision[]
+  posts                PlatformPost[]
+  quotaLedgers         PlatformQuotaLedger[]
+  healthEvents         AccountHealthEvent[]
+}
+
+model UploadSession {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  fileName         String
+  objectKey        String             @unique
+  multipartUploadId String
+  contentType      String
+  fileSizeBytes    Int
+  status           UploadSessionStatus @default(INITIATED)
+  completedAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assets           Asset[]
+}
+
+model Asset {
+  id                 String             @id @default(cuid())
+  workspaceId        String
+  creatorId          String
+  uploadSessionId    String?
+  title              String
+  rawNotes           String?
+  status             AssetStatus        @default(DRAFT)
+  rejectionReason    String?
+  lifecycleStage     String?
+  predictedScore     Float?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator            Creator            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  uploadSession      UploadSession?     @relation(fields: [uploadSessionId], references: [id], onDelete: SetNull)
+  files              AssetFile[]
+  tags               AssetTag[]
+  metadataVariants   MetadataVariant[]
+  campaigns          Campaign[]
+  posts              PlatformPost[]
+  optimization       OptimizationSnapshot[]
+  overrides          Override[]
+  auditLogs          AuditLog[]
+}
+
+model AssetFile {
+  id                String           @id @default(cuid())
+  assetId           String
+  storageKey        String           @unique
+  bucket            String
+  fileName          String
+  extension         String
+  originalMimeType  String
+  sniffedMimeType   String?
+  fileSizeBytes     Int
+  durationSeconds   Float?
+  width             Int?
+  height            Int?
+  fps               Float?
+  bitrate           Int?
+  orientation       String?
+  hasAudio          Boolean?
+  validationStatus  ValidationStatus @default(PENDING)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  asset             Asset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+model AssetTag {
+  id        String   @id @default(cuid())
+  assetId   String
+  label     String
+  kind      String
+  createdAt DateTime @default(now())
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, label, kind])
+}
+
+model MetadataVariant {
+  id             String   @id @default(cuid())
+  assetId        String
+  platform       Platform
+  variantKey     String
+  title          String
+  caption        String
+  hook           String
+  cta            String
+  thumbnailBrief String
+  hashtags       Json
+  keywords       Json
+  modelVersion   String
+  createdAt      DateTime @default(now())
+  asset          Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  decisions      DistributionDecision[]
+
+  @@unique([assetId, platform, variantKey])
+}
+
+model Campaign {
+  id         String         @id @default(cuid())
+  workspaceId String
+  assetId    String
+  status     CampaignStatus @default(DRAFT)
+  summary    Json?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  workspace  Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset      Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  waves      CampaignWave[]
+}
+
+model CampaignWave {
+  id          String      @id @default(cuid())
+  campaignId  String
+  waveNumber  Int
+  status      WaveStatus  @default(PENDING)
+  scheduledFor DateTime?
+  rationale   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  campaign    Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  decisions   DistributionDecision[]
+
+  @@unique([campaignId, waveNumber])
+}
+
+model DistributionDecision {
+  id                String         @id @default(cuid())
+  campaignWaveId    String
+  connectedAccountId String?
+  metadataVariantId String?
+  platform          Platform
+  format            ContentFormat
+  status            DecisionStatus @default(PENDING)
+  scheduledFor      DateTime
+  publishAt         DateTime?
+  score             Float
+  predictedViews    Float?
+  predictedEngagement Float?
+  rationale         Json?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  campaignWave      CampaignWave   @relation(fields: [campaignWaveId], references: [id], onDelete: Cascade)
+  connectedAccount  ConnectedAccount? @relation(fields: [connectedAccountId], references: [id], onDelete: SetNull)
+  metadataVariant   MetadataVariant?  @relation(fields: [metadataVariantId], references: [id], onDelete: SetNull)
+  post              PlatformPost?
+}
+
+model PlatformPost {
+  id               String     @id @default(cuid())
+  workspaceId      String
+  assetId          String
+  decisionId       String     @unique
+  connectedAccountId String?
+  platform         Platform
+  externalPostId   String?
+  externalUrl      String?
+  status           PostStatus @default(SCHEDULED)
+  publishedAt      DateTime?
+  lastPolledAt     DateTime?
+  nextPollAt       DateTime?
+  pollCount        Int        @default(0)
+  metrics          Json?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset            Asset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  decision         DistributionDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount? @relation(fields: [connectedAccountId], references: [id], onDelete: SetNull)
+  snapshots        PostMetricsSnapshot[]
+}
+
+model PostMetricsSnapshot {
+  id               String    @id @default(cuid())
+  platformPostId   String
+  capturedAt       DateTime  @default(now())
+  views            Int?
+  likes            Int?
+  comments         Int?
+  shares           Int?
+  saves            Int?
+  watchTimeSeconds Float?
+  profileVisits    Int?
+  followerConversion Int?
+  rawMetrics       Json
+  platformPost     PlatformPost @relation(fields: [platformPostId], references: [id], onDelete: Cascade)
+}
+
+model PlatformQuotaLedger {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  connectedAccountId String
+  platform         Platform
+  quotaDate        DateTime
+  dailyLimit       Int
+  reservedUnits    Int      @default(0)
+  usedUnits        Int      @default(0)
+  safetyBuffer     Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([connectedAccountId, platform, quotaDate])
+}
+
+model OptimizationSnapshot {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  assetId         String?
+  generatedAt     DateTime @default(now())
+  predictionError Float?
+  timingWeights   Json
+  platformWeights Json
+  hookWeights     Json
+  decisionSummary Json
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset           Asset?    @relation(fields: [assetId], references: [id], onDelete: SetNull)
+}
+
+model CompetitorChannel {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  platform        Platform
+  externalChannelId String
+  name            String
+  topicKeywords   Json
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  observations    CompetitorObservation[]
+
+  @@unique([workspaceId, platform, externalChannelId])
+}
+
+model CompetitorObservation {
+  id               String   @id @default(cuid())
+  competitorChannelId String
+  observedAt       DateTime @default(now())
+  contentCategory  String
+  formatType       String
+  hookStyle        String
+  postingWindow    String
+  engagementBand   String
+  topicKeywords    Json
+  rawMetrics       Json
+  competitorChannel CompetitorChannel @relation(fields: [competitorChannelId], references: [id], onDelete: Cascade)
+}
+
+model OpportunityReport {
+  id          String   @id @default(cuid())
+  workspaceId String
+  generatedAt DateTime @default(now())
+  periodStart DateTime
+  periodEnd   DateTime
+  status      String
+  report      Json
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model AccountHealthEvent {
+  id               String                @id @default(cuid())
+  workspaceId      String
+  connectedAccountId String
+  eventType        String
+  severity         AccountHealthSeverity
+  details          Json
+  createdAt        DateTime              @default(now())
+  workspace        Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount      @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+}
+
+model Override {
+  id          String       @id @default(cuid())
+  workspaceId String
+  assetId     String
+  userId      String?
+  overrideType OverrideType
+  details     Json
+  createdAt   DateTime     @default(now())
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset       Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model AuditLog {
+  id         String          @id @default(cuid())
+  workspaceId String?
+  assetId    String?
+  actorType  AuditActorType
+  actorId    String?
+  eventType  String
+  targetType AuditTargetType
+  targetId   String
+  payload    Json
+  createdAt  DateTime        @default(now())
+  workspace  Workspace?      @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  asset      Asset?          @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+model OAuthState {
+  id          String   @id @default(cuid())
+  workspaceId String
+  provider    Platform
+  state       String   @unique
+  redirectUri String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}

@@ -15,30 +15,34 @@ function timeAgo(iso: string): string {
 
 function getStage(asset: ApiAsset): string {
   if (asset.status === 'ARCHIVED') return 'Archived';
-  const allWaves = asset.campaigns.flatMap(c => c.waves);
+  const allWaves = asset.campaigns.flatMap((campaign) => campaign.waves);
   if (allWaves.length === 0) return asset.status.toLowerCase().replace('_', ' ');
-  const maxWave = Math.max(...allWaves.map(w => w.waveNumber));
-  const activeWave = allWaves.find(w => w.status === 'ACTIVE');
+  const maxWave = Math.max(...allWaves.map((wave) => wave.waveNumber));
+  const activeWave = allWaves.find((wave) => wave.status === 'ACTIVE');
   if (activeWave) return `Active - Wave ${activeWave.waveNumber}`;
   return `Wave ${maxWave} complete`;
 }
 
 function getTotalViews(asset: ApiAsset): number {
   return asset.campaigns
-    .flatMap(c => c.waves)
-    .flatMap(w => w.decisions)
-    .flatMap(d => d.post?.snapshots ?? [])
-    .reduce((sum, s) => sum + (s.views ?? 0), 0);
+    .flatMap((campaign) => campaign.waves)
+    .flatMap((wave) => wave.decisions)
+    .flatMap((decision) => decision.post?.snapshots ?? [])
+    .reduce((sum, snapshot) => sum + (snapshot.views ?? 0), 0);
 }
 
 function formatViews(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n > 0 ? n.toString() : '—';
+  return n > 0 ? n.toString() : '--';
 }
 
 const platformLabels: Record<string, string> = {
-  YOUTUBE: 'YouTube', INSTAGRAM: 'Instagram', LINKEDIN: 'LinkedIn', TIKTOK: 'TikTok', X: 'X',
+  YOUTUBE: 'YouTube',
+  INSTAGRAM: 'Instagram',
+  LINKEDIN: 'LinkedIn',
+  TIKTOK: 'TikTok',
+  X: 'X',
 };
 
 export function AssetLibrary() {
@@ -47,7 +51,8 @@ export function AssetLibrary() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    api.assets.list()
+    api.assets
+      .list()
       .then(setAssets)
       .catch(() => setAssets([]))
       .finally(() => setLoading(false));
@@ -57,7 +62,7 @@ export function AssetLibrary() {
     return (
       <div className="space-y-6">
         <h2 className="text-2xl">Asset library</h2>
-        <div className="flex items-center gap-3 text-zinc-400 p-12 justify-center">
+        <div className="flex items-center gap-3 text-zinc-400 p-8 sm:p-12 justify-center">
           <Loader2 size={18} className="animate-spin" />
           <span className="text-sm">Loading assets...</span>
         </div>
@@ -72,7 +77,7 @@ export function AssetLibrary() {
           <h2 className="text-2xl">Asset library</h2>
           <p className="text-zinc-500 mt-1">Multi-wave lifecycle tracking</p>
         </div>
-        <div className="p-16 border border-white/10 rounded-2xl bg-white/5 text-center space-y-3">
+        <div className="p-10 sm:p-16 border border-white/10 rounded-2xl bg-white/5 text-center space-y-3">
           <Upload size={32} className="text-zinc-600 mx-auto" />
           <p className="text-zinc-500 text-sm">No assets yet. Upload a video from the dashboard to get started.</p>
         </div>
@@ -84,7 +89,7 @@ export function AssetLibrary() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl">Asset library</h2>
-        <p className="text-zinc-500 mt-1">Multi-wave lifecycle tracking · {assets.length} assets</p>
+        <p className="text-zinc-500 mt-1">Multi-wave lifecycle tracking - {assets.length} assets</p>
       </div>
 
       <div className="space-y-3">
@@ -92,18 +97,28 @@ export function AssetLibrary() {
           const isExpanded = expanded === asset.id;
           const stage = getStage(asset);
           const totalViews = getTotalViews(asset);
-          const allWaves = asset.campaigns.flatMap(c => c.waves);
-          const platforms = [...new Set(
-            asset.campaigns.flatMap(c => c.waves).flatMap(w => w.decisions).map(d => d.platform)
-          )];
+          const allWaves = asset.campaigns.flatMap((campaign) => campaign.waves);
+          const platforms = [
+            ...new Set(
+              asset.campaigns
+                .flatMap((campaign) => campaign.waves)
+                .flatMap((wave) => wave.decisions)
+                .map((decision) => decision.platform)
+            ),
+          ];
 
           const stageColor =
-            stage.includes('Active') ? 'text-emerald-400' :
-            stage === 'Archived' ? 'text-zinc-500' : 'text-amber-400';
+            stage.includes('Active')
+              ? 'text-emerald-400'
+              : stage === 'Archived'
+                ? 'text-zinc-500'
+                : 'text-amber-400';
 
-          const StageIcon =
-            stage.includes('Wave 1') ? Play :
-            stage === 'Archived' ? Archive : RefreshCw;
+          const StageIcon = stage.includes('Wave 1')
+            ? Play
+            : stage === 'Archived'
+              ? Archive
+              : RefreshCw;
 
           return (
             <div
@@ -113,29 +128,34 @@ export function AssetLibrary() {
               <div className="absolute top-[-50px] left-[-50px] w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
               <button
                 onClick={() => setExpanded(isExpanded ? null : asset.id)}
-                className="w-full p-6 text-left hover:bg-white/[0.02] transition-colors relative z-10"
+                className="w-full p-4 sm:p-6 text-left hover:bg-white/[0.02] transition-colors relative z-10"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-3">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex-1 min-w-0 space-y-3">
                     <div className="flex items-center gap-3 flex-wrap">
                       <StageIcon size={16} className={stageColor} />
                       <span className={`text-sm ${stageColor}`}>{stage}</span>
-                      <span className="text-sm text-zinc-600">·</span>
+                      <span className="text-sm text-zinc-600">|</span>
                       <span className="text-sm text-zinc-500">{timeAgo(asset.createdAt)}</span>
                     </div>
-                    <h3 className="text-xl font-semibold text-white tracking-tight drop-shadow-sm">{asset.title}</h3>
+                    <h3 className="text-lg sm:text-xl font-semibold text-white tracking-tight drop-shadow-sm break-words">
+                      {asset.title}
+                    </h3>
                     <div className="flex items-center gap-2 flex-wrap">
-                      {platforms.map((p) => (
-                        <span key={p} className="text-xs px-2.5 py-1 bg-gradient-to-r from-white/10 to-white/5 backdrop-blur-md rounded-md text-zinc-300 border border-white/10 font-medium">
-                          {platformLabels[p] ?? p}
+                      {platforms.map((platform) => (
+                        <span
+                          key={platform}
+                          className="text-xs px-2.5 py-1 bg-gradient-to-r from-white/10 to-white/5 backdrop-blur-md rounded-md text-zinc-300 border border-white/10 font-medium"
+                        >
+                          {platformLabels[platform] ?? platform}
                         </span>
                       ))}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-6 flex-shrink-0">
-                    <div className="text-right">
-                      <div className="text-3xl font-bold bg-gradient-to-br from-white to-zinc-500 bg-clip-text text-transparent tabular-nums">
+                  <div className="flex items-center justify-between lg:justify-end gap-4 sm:gap-6">
+                    <div className="text-left sm:text-right">
+                      <div className="text-2xl sm:text-3xl font-bold bg-gradient-to-br from-white to-zinc-500 bg-clip-text text-transparent tabular-nums">
                         {formatViews(totalViews)}
                       </div>
                       <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">total views</div>
@@ -157,39 +177,47 @@ export function AssetLibrary() {
                     transition={{ duration: 0.3 }}
                     className="border-t border-white/10 overflow-hidden"
                   >
-                    <div className="p-6 space-y-4">
+                    <div className="p-4 sm:p-6 space-y-4">
                       {allWaves.length === 0 ? (
-                        <p className="text-sm text-zinc-600 italic">No waves yet — planning in progress.</p>
+                        <p className="text-sm text-zinc-600 italic">No waves yet - planning in progress.</p>
                       ) : (
                         <div className="space-y-2">
-                          {allWaves.flatMap(wave =>
+                          {allWaves.flatMap((wave) =>
                             wave.decisions.map((decision) => {
-                              const snap = decision.post?.snapshots?.[0];
-                              const views = snap?.views ?? 0;
-                              const likes = snap?.likes ?? 0;
-                              const eng = views > 0 ? ((likes / views) * 100).toFixed(1) + '%' : '—';
+                              const snapshot = decision.post?.snapshots?.[0];
+                              const views = snapshot?.views ?? 0;
+                              const likes = snapshot?.likes ?? 0;
+                              const engagement = views > 0 ? `${((likes / views) * 100).toFixed(1)}%` : '--';
 
                               return (
-                                <div key={decision.id} className="flex items-center justify-between p-3 bg-white/5 backdrop-blur-sm rounded-lg border border-white/10">
-                                  <div className="flex items-center gap-4">
-                                    <span className="text-sm text-zinc-500 w-16">Wave {wave.waveNumber}</span>
-                                    <span className="text-sm text-zinc-300 w-24">{platformLabels[decision.platform] ?? decision.platform}</span>
-                                    <span className={`text-xs px-2 py-1 rounded ${
-                                      decision.status === 'PUBLISHED' ? 'bg-emerald-500/20 text-emerald-400' :
-                                      decision.status === 'SCHEDULED' ? 'bg-cyan-500/20 text-cyan-400' :
-                                      decision.status === 'FAILED' ? 'bg-red-500/20 text-red-400' :
-                                      'bg-white/10 text-zinc-400'
-                                    }`}>
+                                <div
+                                  key={decision.id}
+                                  className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between p-3 bg-white/5 backdrop-blur-sm rounded-lg border border-white/10"
+                                >
+                                  <div className="flex flex-wrap items-center gap-3 lg:gap-4">
+                                    <span className="text-sm text-zinc-500">Wave {wave.waveNumber}</span>
+                                    <span className="text-sm text-zinc-300">{platformLabels[decision.platform] ?? decision.platform}</span>
+                                    <span
+                                      className={`text-xs px-2 py-1 rounded ${
+                                        decision.status === 'PUBLISHED'
+                                          ? 'bg-emerald-500/20 text-emerald-400'
+                                          : decision.status === 'SCHEDULED'
+                                            ? 'bg-cyan-500/20 text-cyan-400'
+                                            : decision.status === 'FAILED'
+                                              ? 'bg-red-500/20 text-red-400'
+                                              : 'bg-white/10 text-zinc-400'
+                                      }`}
+                                    >
                                       {decision.status.toLowerCase()}
                                     </span>
                                   </div>
-                                  <div className="flex gap-6 tabular-nums text-sm">
+                                  <div className="flex gap-4 sm:gap-6 tabular-nums text-sm">
                                     <div>
                                       <span className="text-zinc-400">{formatViews(views)}</span>
                                       <span className="text-zinc-600 ml-1">views</span>
                                     </div>
                                     <div>
-                                      <span className="text-zinc-400">{eng}</span>
+                                      <span className="text-zinc-400">{engagement}</span>
                                       <span className="text-zinc-600 ml-1">eng.</span>
                                     </div>
                                   </div>
@@ -200,9 +228,9 @@ export function AssetLibrary() {
                         </div>
                       )}
 
-                      <div className="pt-3 border-t border-white/10 text-sm text-zinc-500">
+                      <div className="pt-3 border-t border-white/10 text-sm text-zinc-500 break-words">
                         Status: {asset.status.toLowerCase().replace(/_/g, ' ')}
-                        {asset.rawNotes && <span className="ml-2 text-zinc-600">· {asset.rawNotes}</span>}
+                        {asset.rawNotes && <span className="ml-2 text-zinc-600">| {asset.rawNotes}</span>}
                       </div>
                     </div>
                   </motion.div>

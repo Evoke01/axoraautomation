@@ -1,13 +1,54 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+const DEFAULT_LOCAL_API_BASE = "http://localhost:4000";
+const DEFAULT_PRODUCTION_API_BASE = "https://api.axora.ai";
+const REQUEST_TIMEOUT_MS = 10000;
+
+function resolveApiBase() {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  if (typeof window === "undefined") {
+    return DEFAULT_LOCAL_API_BASE;
+  }
+
+  const hostname = window.location.hostname;
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return DEFAULT_LOCAL_API_BASE;
+  }
+
+  return DEFAULT_PRODUCTION_API_BASE;
+}
+
+const API_BASE = resolveApiBase();
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers
+      }
+    });
+  } catch (error) {
+    window.clearTimeout(timeoutId);
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Axora API timed out after ${REQUEST_TIMEOUT_MS / 1000}s at ${API_BASE}.`);
     }
-  });
+
+    throw new Error(
+      `Unable to reach the Axora API at ${API_BASE}. Set VITE_API_BASE_URL for this deployment.`
+    );
+  }
+
+  window.clearTimeout(timeoutId);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));

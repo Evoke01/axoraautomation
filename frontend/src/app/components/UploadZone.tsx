@@ -9,7 +9,7 @@ export function UploadZone() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg">Upload</h2>
         <span className="text-sm text-zinc-500">Axora handles the rest</span>
       </div>
@@ -43,7 +43,7 @@ export function UploadZone() {
             }, i * 800);
           });
         }}
-        className={`border-2 border-dashed rounded-3xl p-12 transition-all cursor-pointer backdrop-blur-xl relative overflow-hidden ${
+        className={`group border-2 border-dashed rounded-3xl p-6 sm:p-8 lg:p-12 min-h-[260px] sm:min-h-[300px] transition-all cursor-pointer backdrop-blur-xl relative overflow-hidden ${
           isDragging
             ? 'border-transparent bg-gradient-to-br from-emerald-500/20 via-cyan-500/10 to-violet-500/20 shadow-2xl shadow-cyan-500/30 ring-2 ring-cyan-400'
             : isProcessing
@@ -61,7 +61,7 @@ export function UploadZone() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col items-center gap-4 text-center"
+              className="flex min-h-[210px] flex-col items-center justify-center gap-4 text-center"
             >
               <div className="p-5 rounded-full bg-gradient-to-tr from-white/10 to-white/5 backdrop-blur-md border border-white/20 shadow-lg shadow-black/20 group-hover:scale-110 transition-transform duration-300">
                 {isDragging ? <Film size={36} className="text-cyan-400" /> : <Upload size={36} className="text-emerald-400 group-hover:text-cyan-400 transition-colors" />}

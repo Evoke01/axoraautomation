@@ -87,13 +87,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
       {/* Mobile hamburger */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-xl bg-zinc-900/80 backdrop-blur-xl border border-white/10 text-zinc-300 hover:text-white transition-colors"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2.5 rounded-xl bg-zinc-900/80 backdrop-blur-xl border border-white/10 text-zinc-300 hover:text-white transition-colors shadow-lg"
       >
         <Menu size={22} />
       </button>
 
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-64 border-r border-white/10 flex-col backdrop-blur-xl bg-zinc-950/50 relative z-20">
+      <aside className="hidden lg:flex w-64 xl:w-72 border-r border-white/10 flex-col backdrop-blur-xl bg-zinc-950/50 relative z-20">
         {navContent}
       </aside>
 
@@ -113,7 +113,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-              className="lg:hidden fixed top-0 left-0 bottom-0 w-72 z-50 flex flex-col bg-zinc-950/95 backdrop-blur-xl border-r border-white/10"
+              className="lg:hidden fixed top-0 left-0 bottom-0 w-[calc(100vw-1rem)] max-w-xs z-50 flex flex-col bg-zinc-950/95 backdrop-blur-xl border-r border-white/10"
             >
               <button
                 onClick={() => setMobileOpen(false)}

@@ -27,11 +27,46 @@ export class DashboardService {
       where: { workspaceId },
       include: {
         asset: true,
-        decision: true,
+        decision: {
+          include: {
+            metadataVariant: true,
+            campaignWave: true
+          }
+        },
         connectedAccount: true,
         snapshots: {
           orderBy: { capturedAt: "desc" },
           take: 1
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
+  async listAssets(workspaceId: string) {
+    return this.prisma.asset.findMany({
+      where: { workspaceId },
+      include: {
+        tags: true,
+        campaigns: {
+          include: {
+            waves: {
+              include: {
+                decisions: {
+                  include: {
+                    post: {
+                      include: {
+                        snapshots: {
+                          orderBy: { capturedAt: "desc" },
+                          take: 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       },
       orderBy: { createdAt: "desc" }

@@ -17,6 +17,69 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface ApiPost {
+  id: string;
+  platform: string;
+  status: string;
+  publishedAt: string | null;
+  externalUrl: string | null;
+  metrics: { views?: number; likes?: number; comments?: number } | null;
+  asset: { id: string; title: string; status: string };
+  decision: {
+    id: string;
+    platform: string;
+    format: string;
+    scheduledFor: string;
+    score: number;
+    metadataVariant: {
+      caption: string;
+      hashtags: string[];
+      title: string;
+      hook: string;
+    } | null;
+    campaignWave: {
+      waveNumber: number;
+    } | null;
+  };
+  connectedAccount: { accountLabel: string } | null;
+}
+
+export interface ApiAsset {
+  id: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  rawNotes: string | null;
+  tags: { label: string; kind: string }[];
+  campaigns: Array<{
+    id: string;
+    status: string;
+    waves: Array<{
+      id: string;
+      waveNumber: number;
+      status: string;
+      decisions: Array<{
+        id: string;
+        platform: string;
+        format: string;
+        status: string;
+        scheduledFor: string;
+        post: {
+          id: string;
+          status: string;
+          publishedAt: string | null;
+          externalUrl: string | null;
+          snapshots: Array<{
+            views: number | null;
+            likes: number | null;
+            comments: number | null;
+          }>;
+        } | null;
+      }>;
+    }>;
+  }>;
+}
+
 export const api = {
   dashboard: {
     getSummary: () =>
@@ -29,32 +92,14 @@ export const api = {
   },
 
   posts: {
-    list: () =>
-      request<
-        Array<{
-          id: string;
-          platform: string;
-          status: string;
-          publishedAt: string | null;
-          externalUrl: string | null;
-          metrics: { views?: number; likes?: number; comments?: number } | null;
-          asset: { id: string; title: string; status: string };
-          decision: {
-            id: string;
-            platform: string;
-            format: string;
-            scheduledFor: string;
-            score: number;
-          };
-          connectedAccount: { accountLabel: string } | null;
-        }>
-      >("/posts"),
+    list: () => request<ApiPost[]>("/posts"),
   },
 
   assets: {
-    get: (id: string) => request<Record<string, unknown>>(`/assets/${id}`),
+    list: () => request<ApiAsset[]>("/assets"),
+    get: (id: string) => request<ApiAsset>(`/assets/${id}`),
     create: (data: { workspaceId: string; creatorId: string; title: string; rawNotes?: string }) =>
-      request<Record<string, unknown>>("/assets", {
+      request<ApiAsset>("/assets", {
         method: "POST",
         body: JSON.stringify(data)
       }),

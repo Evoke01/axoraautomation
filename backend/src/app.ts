@@ -6,6 +6,8 @@ import { Queue } from "bullmq";
 import Fastify from "fastify";
 import { Redis } from "ioredis";
 
+import { InstagramAdapter } from "./adapters/instagram-adapter.js";
+import { TikTokAdapter } from "./adapters/tiktok-adapter.js";
 import { YouTubeAdapter } from "./adapters/youtube-adapter.js";
 import { env } from "./config/env.js";
 import { prisma } from "./db.js";
@@ -20,6 +22,7 @@ import { AssetValidationService } from "./services/asset-validation-service.js";
 import { AuditService } from "./services/audit-service.js";
 import { AuthService } from "./services/auth-service.js";
 import { CampaignService } from "./services/campaign-service.js";
+import { ConnectionService } from "./services/connection-service.js";
 import { DashboardService } from "./services/dashboard-service.js";
 import { MetadataService } from "./services/metadata-service.js";
 import { OptimizationService } from "./services/optimization-service.js";
@@ -42,7 +45,10 @@ export type AppServices = {
   campaigns: CampaignService;
   optimization: OptimizationService;
   dashboard: DashboardService;
+  connections: ConnectionService;
   youtube: YouTubeAdapter;
+  instagram: InstagramAdapter;
+  tiktok: TikTokAdapter;
 };
 
 export async function buildApp(): Promise<FastifyInstance & { services: AppServices }> {
@@ -67,7 +73,10 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const campaigns = new CampaignService(prisma, queue, audit);
   const optimization = new OptimizationService(prisma);
   const dashboard = new DashboardService(prisma);
+  const connections = new ConnectionService(prisma, audit);
   const youtube = new YouTubeAdapter(prisma, storage, audit);
+  const instagram = new InstagramAdapter(prisma, audit);
+  const tiktok = new TikTokAdapter(prisma, audit);
 
   app.decorate("services", {
     env,
@@ -85,7 +94,10 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     campaigns,
     optimization,
     dashboard,
-    youtube
+    connections,
+    youtube,
+    instagram,
+    tiktok
   });
 
   await app.register(cors, { origin: true, credentials: true });

@@ -80,6 +80,27 @@ export interface ApiAsset {
   }>;
 }
 
+export interface ApiConnectionAccount {
+  id: string;
+  accountLabel: string;
+  externalAccountId: string | null;
+  status: string;
+  tokenExpiresAt: string | null;
+  metadata: unknown;
+}
+
+export interface ApiConnection {
+  platform: string;
+  label: string;
+  connectable: boolean;
+  configured: boolean;
+  connected: boolean;
+  note: string;
+  accounts: ApiConnectionAccount[];
+}
+
+type ConnectablePlatform = "youtube" | "instagram" | "tiktok";
+
 export const api = {
   dashboard: {
     getSummary: () =>
@@ -117,6 +138,17 @@ export const api = {
         creator: { id: string; name: string } | null;
         entitlements: { plan: string } | null;
       }>("/auth/session/resolve", { method: "POST" }),
+  },
+
+  connections: {
+    list: () => request<ApiConnection[]>("/connections"),
+    start: (platform: ConnectablePlatform) =>
+      request<{ url: string }>(`/connections/${platform}/start`, { method: "POST" }),
+    disconnect: (id: string) =>
+      request<{ disconnected: boolean; account: ApiConnectionAccount | null }>(
+        `/connections/${id}/disconnect`,
+        { method: "POST" }
+      )
   },
 
   health: {

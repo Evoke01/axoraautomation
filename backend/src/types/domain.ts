@@ -35,7 +35,7 @@ export const createAssetSchema = z.object({
 export const overrideAssetSchema = z.object({
   scheduleFor: z.string().datetime().optional(),
   caption: z.string().optional(),
-  platform: z.enum(["YOUTUBE", "LINKEDIN"]).optional(),
+  platform: z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK", "LINKEDIN", "X"]).optional(),
   archive: z.boolean().optional()
 });
 

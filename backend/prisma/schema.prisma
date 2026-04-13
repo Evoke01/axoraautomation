@@ -22,6 +22,8 @@ enum MembershipRole {
 
 enum Platform {
   YOUTUBE
+  INSTAGRAM
+  TIKTOK
   LINKEDIN
   X
 }
@@ -526,6 +528,7 @@ model OAuthState {
   workspaceId String
   provider    Platform
   state       String   @unique
+  codeVerifier String?
   redirectUri String
   expiresAt   DateTime
   createdAt   DateTime @default(now())

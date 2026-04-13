@@ -11,7 +11,7 @@ import { AuditService } from "../services/audit-service.js";
 
 const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
-  "https://www.googleapis.com/auth/youtube.readonly"
+  "https://www.googleapis.com/auth/youtube"
 ];
 
 export class YouTubeAdapter {
@@ -49,6 +49,7 @@ export class YouTubeAdapter {
 
     return client.generateAuthUrl({
       access_type: "offline",
+      include_granted_scopes: true,
       prompt: "consent",
       scope: YOUTUBE_SCOPES,
       state

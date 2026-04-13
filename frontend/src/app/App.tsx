@@ -9,7 +9,11 @@ import { Settings } from './components/Settings';
 import { Queue } from './components/Queue';
 
 export default function App() {
-  const [activeView, setActiveView] = useState('dashboard');
+  const initialView =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('view') ?? 'dashboard'
+      : 'dashboard';
+  const [activeView, setActiveView] = useState(initialView);
 
   return (
     <div className="size-full flex bg-zinc-950 text-zinc-100 relative overflow-hidden">

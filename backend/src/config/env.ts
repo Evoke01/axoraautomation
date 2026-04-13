@@ -6,6 +6,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
   APP_URL: z.string().url(),
+  FRONTEND_APP_URL: z.string().url().optional().or(z.literal("")),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   APP_ENCRYPTION_KEY: z.string().min(16),
@@ -23,6 +24,27 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().url().optional(),
+  INSTAGRAM_CLIENT_ID: z.string().optional(),
+  INSTAGRAM_CLIENT_SECRET: z.string().optional(),
+  INSTAGRAM_REDIRECT_URI: z.string().url().optional(),
+  INSTAGRAM_AUTH_URL: z.string().url().default("https://www.instagram.com/oauth/authorize"),
+  INSTAGRAM_TOKEN_URL: z.string().url().default("https://api.instagram.com/oauth/access_token"),
+  INSTAGRAM_LONG_LIVED_TOKEN_URL: z
+    .string()
+    .url()
+    .default("https://graph.instagram.com/access_token"),
+  INSTAGRAM_ME_URL: z.string().url().default("https://graph.instagram.com/me"),
+  TIKTOK_CLIENT_KEY: z.string().optional(),
+  TIKTOK_CLIENT_SECRET: z.string().optional(),
+  TIKTOK_REDIRECT_URI: z.string().url().optional(),
+  TIKTOK_AUTH_URL: z
+    .string()
+    .url()
+    .default("https://www.tiktok.com/v2/auth/authorize/"),
+  TIKTOK_TOKEN_URL: z
+    .string()
+    .url()
+    .default("https://open.tiktokapis.com/v2/oauth/token/"),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().url().optional(),
   OPENAI_MODEL: z.string().default("deepseek-chat"),
@@ -45,6 +67,7 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   AUTH_JWKS_URL: parsed.data.AUTH_JWKS_URL || undefined,
+  FRONTEND_APP_URL: parsed.data.FRONTEND_APP_URL || undefined,
   S3_PUBLIC_BASE_URL: parsed.data.S3_PUBLIC_BASE_URL || undefined
 };
 

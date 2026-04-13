@@ -2,8 +2,8 @@
 
 Axora is an autonomous content distribution backend for creator video assets. This repository now contains:
 
-- `backend/`: the TypeScript backend foundation for uploads, validation, planning, review gating, BullMQ orchestration, YouTube connection flow, metrics polling, optimization snapshots, and weekly opportunity reporting
-- `frontend/`: existing placeholder frontend code that has not yet been rebuilt for Axora
+- `backend/`: the TypeScript backend foundation for uploads, validation, planning, review gating, BullMQ orchestration, platform connection flows, metrics polling, optimization snapshots, and weekly opportunity reporting
+- `frontend/`: the Axora dashboard UI, including live platform connection management in Settings
 
 ## Backend stack
 
@@ -12,6 +12,8 @@ Axora is an autonomous content distribution backend for creator video assets. Th
 - BullMQ + Redis
 - S3-compatible object storage for raw assets
 - YouTube OAuth + publishing adapter
+- Instagram OAuth setup scaffolding
+- TikTok OAuth setup scaffolding
 
 ## Backend setup
 
@@ -25,6 +27,35 @@ Axora is an autonomous content distribution backend for creator video assets. Th
    `npm run prisma:push`
 6. Start the backend:
    `npm run dev`
+
+## Platform API setup
+
+Set these env vars before using the Settings screen to connect accounts:
+
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+- `INSTAGRAM_CLIENT_ID`, `INSTAGRAM_CLIENT_SECRET`, `INSTAGRAM_REDIRECT_URI`
+- `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`
+- `FRONTEND_APP_URL`
+
+Optional endpoint override vars are also supported for Instagram and TikTok.
+
+Current platform scope:
+
+- `YouTube`: full OAuth connect, upload, publish, and metrics polling
+- `Instagram`: OAuth account connection scaffolding and token storage
+- `TikTok`: OAuth account connection scaffolding and token storage with refresh support
+- `LinkedIn` and `X`: intentionally not connectable in the current MVP
+
+## Connection routes
+
+- `GET /connections`
+- `POST /connections/youtube/start`
+- `GET /connections/youtube/callback`
+- `POST /connections/instagram/start`
+- `GET /connections/instagram/callback`
+- `POST /connections/tiktok/start`
+- `GET /connections/tiktok/callback`
+- `POST /connections/:id/disconnect`
 
 ## Key backend flows
 

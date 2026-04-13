@@ -9,3 +9,10 @@ backend/uploads/
 frontend/dist/
 frontend/node_modules/
 .DS_Store
+
+node_modules/
+.vscode/
+.env
+frontend/.env
+*.pyc
+__pycache__/

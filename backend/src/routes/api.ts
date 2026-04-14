@@ -1,4 +1,4 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   createAssetSchema,
@@ -87,10 +87,10 @@ export async function registerApiRoutes(app: FastifyInstance) {
     try {
       const query = z.object({ state: z.string().min(1), code: z.string().min(1) }).parse(request.query);
       await app.services.youtube.handleCallback(query.state, query.code);
-      return reply.redirect(${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=success);
+      return reply.redirect(`${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=success`);
     } catch (err) {
       request.log.error(err);
-      return reply.redirect(${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=error);
+      return reply.redirect(`${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=error`);
     }
   });
 

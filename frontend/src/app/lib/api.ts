@@ -1,61 +1,30 @@
-const DEFAULT_LOCAL_API_BASE = "http://localhost:4000";
-const DEFAULT_PRODUCTION_API_BASE = "https://api.axora.ai";
-const REQUEST_TIMEOUT_MS = 10000;
-
-function resolveApiBase() {
-  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
-  if (configured) {
-    return configured.replace(/\/+$/, "");
-  }
-
-  if (typeof window === "undefined") {
-    return DEFAULT_LOCAL_API_BASE;
-  }
-
-  const hostname = window.location.hostname;
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return DEFAULT_LOCAL_API_BASE;
-  }
-
-  return DEFAULT_PRODUCTION_API_BASE;
-}
-
-const API_BASE = resolveApiBase();
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let res: Response;
-
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers
-      }
-    });
-  } catch (error) {
-    window.clearTimeout(timeoutId);
-
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error(`Axora API timed out after ${REQUEST_TIMEOUT_MS / 1000}s at ${API_BASE}.`);
-    }
-
-    throw new Error(
-      `Unable to reach the Axora API at ${API_BASE}. Set VITE_API_BASE_URL for this deployment.`
-    );
-  }
-
-  window.clearTimeout(timeoutId);
-
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...options?.headers }
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(body.message || `Request failed: ${res.status}`);
   }
-
   return res.json();
+}
+
+export interface ApiConnection {
+  platform: string;
+  label: string;
+  note: string;
+  connectable: boolean;
+  connected: boolean;
+  accounts: Array<{
+    id: string;
+    accountLabel: string;
+    status: string;
+    externalAccountId: string | null;
+    tokenExpiresAt: string | null;
+  }>;
 }
 
 export interface ApiPost {
@@ -72,15 +41,8 @@ export interface ApiPost {
     format: string;
     scheduledFor: string;
     score: number;
-    metadataVariant: {
-      caption: string;
-      hashtags: string[];
-      title: string;
-      hook: string;
-    } | null;
-    campaignWave: {
-      waveNumber: number;
-    } | null;
+    metadataVariant: { caption: string; hashtags: string[]; title: string; hook: string } | null;
+    campaignWave: { waveNumber: number } | null;
   };
   connectedAccount: { accountLabel: string } | null;
 }
@@ -110,47 +72,53 @@ export interface ApiAsset {
           status: string;
           publishedAt: string | null;
           externalUrl: string | null;
-          snapshots: Array<{
-            views: number | null;
-            likes: number | null;
-            comments: number | null;
-          }>;
+          snapshots: Array<{ views: number | null; likes: number | null; comments: number | null }>;
         } | null;
       }>;
     }>;
   }>;
 }
 
-export interface ApiConnectionAccount {
-  id: string;
-  accountLabel: string;
-  externalAccountId: string | null;
-  status: string;
-  tokenExpiresAt: string | null;
-  metadata: unknown;
+export interface ApiSession {
+  user: { id: string; name: string | null; email: string | null };
+  workspace: { id: string; name: string };
+  creator: { id: string; name: string } | null;
+  entitlements: { plan: string; autoPublishEnabled: boolean } | null;
 }
-
-export interface ApiConnection {
-  platform: string;
-  label: string;
-  connectable: boolean;
-  configured: boolean;
-  connected: boolean;
-  note: string;
-  accounts: ApiConnectionAccount[];
-}
-
-type ConnectablePlatform = "youtube" | "instagram" | "tiktok";
 
 export const api = {
+  auth: {
+    resolveSession: () => request<ApiSession>("/auth/session/resolve", { method: "POST" }),
+  },
+
+  connections: {
+    list: () => request<ApiConnection[]>("/connections"),
+    start: (platform: string) =>
+      request<{ url: string }>(`/connections/${platform}/start`, { method: "POST" }),
+    disconnect: (accountId: string) =>
+      request<{ disconnected: boolean }>(`/connections/${accountId}`, { method: "DELETE" }),
+  },
+
+  uploads: {
+    init: (body: { workspaceId: string; fileName: string; contentType: string; fileSizeBytes: number }) =>
+      request<{ uploadSessionId: string; uploadId: string; objectKey: string }>(
+        "/uploads/multipart/init", { method: "POST", body: JSON.stringify(body) }
+      ),
+    partUrl: (body: { uploadSessionId: string; partNumber: number }) =>
+      request<{ url: string; partNumber: number }>(
+        "/uploads/multipart/part-url", { method: "POST", body: JSON.stringify(body) }
+      ),
+    complete: (body: { uploadSessionId: string; parts: { ETag: string; PartNumber: number }[] }) =>
+      request<{ completed: boolean }>(
+        "/uploads/multipart/complete", { method: "POST", body: JSON.stringify(body) }
+      ),
+  },
+
   dashboard: {
     getSummary: () =>
-      request<{
-        assets: number;
-        publishedPosts: number;
-        pendingReview: number;
-        latestOpportunityReportAt: string | null;
-      }>("/dashboard/summary"),
+      request<{ assets: number; publishedPosts: number; pendingReview: number; latestOpportunityReportAt: string | null }>(
+        "/dashboard/summary"
+      ),
   },
 
   posts: {
@@ -160,36 +128,12 @@ export const api = {
   assets: {
     list: () => request<ApiAsset[]>("/assets"),
     get: (id: string) => request<ApiAsset>(`/assets/${id}`),
-    create: (data: { workspaceId: string; creatorId: string; title: string; rawNotes?: string }) =>
-      request<ApiAsset>("/assets", {
-        method: "POST",
-        body: JSON.stringify(data)
-      }),
+    create: (data: { workspaceId: string; creatorId: string; uploadSessionId: string; title: string; rawNotes?: string }) =>
+      request<ApiAsset>("/assets", { method: "POST", body: JSON.stringify(data) }),
     plan: (id: string) =>
       request<{ queued: boolean }>(`/assets/${id}/plan`, { method: "POST" }),
     approve: (id: string) =>
       request<{ approved: boolean }>(`/assets/${id}/approve`, { method: "POST" }),
-  },
-
-  auth: {
-    resolveSession: () =>
-      request<{
-        user: { id: string; name: string; email: string };
-        workspace: { id: string; name: string };
-        creator: { id: string; name: string } | null;
-        entitlements: { plan: string } | null;
-      }>("/auth/session/resolve", { method: "POST" }),
-  },
-
-  connections: {
-    list: () => request<ApiConnection[]>("/connections"),
-    start: (platform: ConnectablePlatform) =>
-      request<{ url: string }>(`/connections/${platform}/start`, { method: "POST" }),
-    disconnect: (id: string) =>
-      request<{ disconnected: boolean; account: ApiConnectionAccount | null }>(
-        `/connections/${id}/disconnect`,
-        { method: "POST" }
-      )
   },
 
   health: {

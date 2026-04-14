@@ -1,9 +1,5 @@
 import type { FastifyInstance } from "fastify";
-
 import { z } from "zod";
-
-import { buildOAuthRedirect } from "../lib/oauth-redirect.js";
-import { AuthError, ValidationError } from "../lib/errors.js";
 import {
   createAssetSchema,
   overrideAssetSchema,
@@ -13,97 +9,80 @@ import {
 } from "../types/domain.js";
 
 export async function registerApiRoutes(app: FastifyInstance) {
+  // AUTH
   app.post("/auth/session/resolve", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
-    return {
-      user: session.user,
-      workspace: session.workspace,
-      creator: session.creator,
-      entitlements: session.entitlements
-    };
+    return { user: session.user, workspace: session.workspace, creator: session.creator, entitlements: session.entitlements };
   });
 
+  // CONNECTIONS - list all for workspace
   app.get("/connections", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
-    return app.services.connections.list(session.workspace.id);
+    const accounts = await app.services.prisma.connectedAccount.findMany({
+      where: { workspaceId: session.workspace.id },
+      orderBy: { createdAt: "asc" }
+    });
+
+    const PLATFORM_META: Record<string, { label: string; note: string; connectable: boolean }> = {
+      YOUTUBE:   { label: "YouTube",   note: "Ready for channel OAuth, uploads, and metrics polling.", connectable: true },
+      INSTAGRAM: { label: "Instagram", note: "Missing OAuth credentials in the backend environment.", connectable: false },
+      TIKTOK:    { label: "TikTok",    note: "Content Posting API access required.", connectable: false },
+      LINKEDIN:  { label: "LinkedIn",  note: "Video posting requires allowlist approval.", connectable: false },
+      X:         { label: "X (Twitter)", note: "Posting requires paid API tier.", connectable: false },
+    };
+
+    const allPlatforms = ["YOUTUBE", "INSTAGRAM", "TIKTOK", "LINKEDIN", "X"];
+
+    return allPlatforms.map((platform) => {
+      const meta = PLATFORM_META[platform]!;
+      const platformAccounts = accounts.filter(a => a.platform === platform);
+      const connected = platformAccounts.some(a => a.status === "ACTIVE");
+      return {
+        platform,
+        label: meta.label,
+        note: meta.note,
+        connectable: meta.connectable,
+        connected,
+        accounts: platformAccounts.map(a => ({
+          id: a.id,
+          accountLabel: a.accountLabel,
+          status: a.status,
+          externalAccountId: a.externalAccountId,
+          tokenExpiresAt: a.tokenExpiresAt
+        }))
+      };
+    });
   });
 
+  // CONNECTIONS - disconnect
+  app.delete("/connections/:id", async (request) => {
+    const session = await app.services.auth.resolveSession(request.headers);
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const account = await app.services.prisma.connectedAccount.findUnique({ where: { id: params.id } });
+    if (!account || account.workspaceId !== session.workspace.id) {
+      return { disconnected: false, error: "Account not found." };
+    }
+    await app.services.prisma.connectedAccount.update({
+      where: { id: params.id },
+      data: { status: "DISCONNECTED", accessTokenEncrypted: null, refreshTokenEncrypted: null }
+    });
+    return { disconnected: true };
+  });
+
+  // YOUTUBE OAUTH
   app.post("/connections/youtube/start", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     const url = await app.services.youtube.getAuthorizationUrl(session.workspace.id);
     return { url };
   });
 
-  app.get("/connections/youtube/callback", async (request, reply) => {
-    try {
-      const query = parseOAuthCallbackQuery(request.query);
-      assertNoOAuthError(query, "youtube");
-      const state = requireOAuthField(query.state, "state");
-      const code = requireOAuthField(query.code, "code");
-
-      const account = await app.services.youtube.handleCallback(state, code);
-      return respondToOAuthCallback(reply, app.services.env.FRONTEND_APP_URL, "youtube", {
-        connected: true,
-        account
-      });
-    } catch (error) {
-      return respondToOAuthError(reply, app.services.env.FRONTEND_APP_URL, "youtube", error);
-    }
+  app.get("/connections/youtube/callback", async (request) => {
+    const query = z.object({ state: z.string().min(1), code: z.string().min(1) }).parse(request.query);
+    const account = await app.services.youtube.handleCallback(query.state, query.code);
+    return { connected: true, account };
   });
 
-  app.post("/connections/instagram/start", async (request) => {
-    const session = await app.services.auth.resolveSession(request.headers);
-    const url = await app.services.instagram.getAuthorizationUrl(session.workspace.id);
-    return { url };
-  });
-
-  app.get("/connections/instagram/callback", async (request, reply) => {
-    try {
-      const query = parseOAuthCallbackQuery(request.query);
-      assertNoOAuthError(query, "instagram");
-      const state = requireOAuthField(query.state, "state");
-      const code = requireOAuthField(query.code, "code");
-
-      const account = await app.services.instagram.handleCallback(state, code);
-      return respondToOAuthCallback(reply, app.services.env.FRONTEND_APP_URL, "instagram", {
-        connected: true,
-        account
-      });
-    } catch (error) {
-      return respondToOAuthError(reply, app.services.env.FRONTEND_APP_URL, "instagram", error);
-    }
-  });
-
-  app.post("/connections/tiktok/start", async (request) => {
-    const session = await app.services.auth.resolveSession(request.headers);
-    const url = await app.services.tiktok.getAuthorizationUrl(session.workspace.id);
-    return { url };
-  });
-
-  app.get("/connections/tiktok/callback", async (request, reply) => {
-    try {
-      const query = parseOAuthCallbackQuery(request.query);
-      assertNoOAuthError(query, "tiktok");
-      const state = requireOAuthField(query.state, "state");
-      const code = requireOAuthField(query.code, "code");
-
-      const account = await app.services.tiktok.handleCallback(state, code);
-      return respondToOAuthCallback(reply, app.services.env.FRONTEND_APP_URL, "tiktok", {
-        connected: true,
-        account
-      });
-    } catch (error) {
-      return respondToOAuthError(reply, app.services.env.FRONTEND_APP_URL, "tiktok", error);
-    }
-  });
-
-  app.post("/connections/:id/disconnect", async (request) => {
-    const session = await app.services.auth.resolveSession(request.headers);
-    const params = z.object({ id: z.string().min(1) }).parse(request.params);
-    const account = await app.services.connections.disconnect(params.id, session.user.id);
-    return { disconnected: Boolean(account), account };
-  });
-
+  // UPLOADS
   app.post("/uploads/multipart/init", async (request) => {
     await app.services.auth.resolveSession(request.headers);
     const body = uploadInitSchema.parse(request.body);
@@ -122,6 +101,7 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.uploads.completeMultipartUpload(body);
   });
 
+  // ASSETS
   app.get("/assets", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.listAssets(session.workspace.id);
@@ -161,6 +141,7 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return { updated: true };
   });
 
+  // POSTS & DASHBOARD
   app.get("/posts", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.listPosts(session.workspace.id);
@@ -180,61 +161,4 @@ export async function registerApiRoutes(app: FastifyInstance) {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.getAccountHealth(session.workspace.id);
   });
-}
-
-const oauthCallbackQuerySchema = z.object({
-  state: z.string().min(1).optional(),
-  code: z.string().min(1).optional(),
-  error: z.string().min(1).optional(),
-  error_description: z.string().min(1).optional()
-});
-
-function parseOAuthCallbackQuery(query: unknown) {
-  return oauthCallbackQuerySchema.parse(query);
-}
-
-function assertNoOAuthError(
-  query: z.infer<typeof oauthCallbackQuerySchema>,
-  platform: string
-) {
-  if (query.error) {
-    throw new AuthError(
-      `${platform} OAuth failed: ${query.error_description ?? query.error}`
-    );
-  }
-}
-
-function requireOAuthField(value: string | undefined, field: string) {
-  if (!value) {
-    throw new ValidationError(`OAuth callback is missing "${field}".`);
-  }
-
-  return value;
-}
-
-function respondToOAuthCallback(
-  reply: { redirect: (url: string) => unknown },
-  frontendUrl: string | undefined,
-  platform: string,
-  payload: Record<string, unknown>
-) {
-  if (frontendUrl) {
-    return reply.redirect(buildOAuthRedirect(frontendUrl, platform, "success"));
-  }
-
-  return payload;
-}
-
-function respondToOAuthError(
-  reply: { redirect: (url: string) => unknown },
-  frontendUrl: string | undefined,
-  platform: string,
-  error: unknown
-) {
-  if (frontendUrl) {
-    const message = error instanceof Error ? error.message : "OAuth callback failed.";
-    return reply.redirect(buildOAuthRedirect(frontendUrl, platform, "error", message));
-  }
-
-  throw error;
 }

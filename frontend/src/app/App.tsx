@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MetricsOverview } from './components/MetricsOverview';
 import { UploadZone } from './components/UploadZone';
@@ -10,7 +10,8 @@ import { Queue } from './components/Queue';
 import { api, type ApiSession } from './lib/api';
 
 export default function App() {
-  const [activeView, setActiveView] = useState('dashboard');
+  const initialView = new URLSearchParams(window.location.search).get('view') ?? 'dashboard';
+  const [activeView, setActiveView] = useState(initialView);
   const [session, setSession] = useState<ApiSession | null>(null);
   const [dashboardKey, setDashboardKey] = useState(0);
 
@@ -49,3 +50,4 @@ export default function App() {
     </div>
   );
 }
+

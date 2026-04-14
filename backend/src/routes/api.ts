@@ -86,7 +86,12 @@ export async function registerApiRoutes(app: FastifyInstance) {
   app.post("/uploads/multipart/init", async (request) => {
     await app.services.auth.resolveSession(request.headers);
     const body = uploadInitSchema.parse(request.body);
-    return app.services.uploads.initMultipartUpload(body);
+    const session = await app.services.uploads.initMultipartUpload(body);
+    return {
+      uploadSessionId: session.id,
+      uploadId: session.multipartUploadId,
+      objectKey: session.objectKey,
+    };
   });
 
   app.post("/uploads/multipart/part-url", async (request) => {
@@ -162,4 +167,5 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.getAccountHealth(session.workspace.id);
   });
 }
+
 

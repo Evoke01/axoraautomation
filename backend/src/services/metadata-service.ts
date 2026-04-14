@@ -153,12 +153,9 @@ Generate 3 metadata variants.`;
     // Strip markdown code fences if present
     const cleaned = content.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
 
-    const parsed = JSON.parse(cleaned) as AIVariant[];
-
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error("AI returned invalid format");
-    }
-
+    const raw = JSON.parse(cleaned);
+    const parsed: AIVariant[] = Array.isArray(raw) ? raw : [raw];
+    if (parsed.length === 0) { throw new Error("AI returned invalid format"); }
     return parsed.map((v) => ({
       variantKey: v.variantKey ?? "primary",
       title: v.title ?? asset.title,
@@ -220,4 +217,5 @@ Generate 3 metadata variants.`;
     ];
   }
 }
+
 

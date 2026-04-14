@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+﻿import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   createAssetSchema,
@@ -162,3 +162,4 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.getAccountHealth(session.workspace.id);
   });
 }
+

@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+﻿import crypto from "node:crypto";
 
 import { Platform, type PrismaClient } from "@prisma/client";
 
@@ -127,21 +127,7 @@ export class MetadataService {
   ): Promise<AIVariant[]> {
     const fileShape = file.durationSeconds && file.durationSeconds <= 60 ? "short-form" : "long-form";
 
-    const systemPrompt = `You are Axora, an elite content distribution AI. Generate YouTube metadata variants for a creator's video asset.
-
-Return ONLY valid JSON — an array of exactly 3 objects. No markdown, no backticks, no explanation.
-
-Each object must have these exact keys:
-- "variantKey": one of "primary", "curiosity", "direct"
-- "title": compelling YouTube title (max 70 chars)
-- "hook": one-sentence hook that stops scrolling
-- "caption": 2-3 sentence video description
-- "cta": short call-to-action
-- "thumbnailBrief": brief thumbnail concept description
-- "hashtags": array of 3-5 hashtags
-- "keywords": array of 5-8 SEO keywords
-
-Make the content viral-worthy, emotionally charged, and optimized for YouTube CTR.`;
+    const systemPrompt = `You are Axora. Generate YouTube metadata for a creator video. Return ONLY a JSON object (no markdown). Keys: variantKey ("primary"), title (max 70 chars), hook (1 sentence), caption (2 sentences), cta (short), hashtags (array of 4), keywords (array of 5).`;
 
     const userPrompt = `Creator: ${asset.creator.name}
 Niche: ${asset.creator.niche ?? "general"}
@@ -159,7 +145,7 @@ Generate 3 metadata variants.`;
         { role: "user", content: userPrompt }
       ],
       temperature: 0.8,
-      max_tokens: 2000
+      max_tokens: 500
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? "[]";
@@ -234,3 +220,4 @@ Generate 3 metadata variants.`;
     ];
   }
 }
+

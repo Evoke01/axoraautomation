@@ -9,6 +9,12 @@ import {
 } from "../types/domain.js";
 
 export async function registerApiRoutes(app: FastifyInstance) {
+  // Allow empty JSON bodies (e.g. POST with no payload)
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (!body || body === '') { done(null, {}); return; }
+    try { done(null, JSON.parse(body as string)); } catch (e) { done(e as Error, undefined); }
+  });
+
   // AUTH
   app.post("/auth/session/resolve", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
@@ -167,5 +173,6 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.getAccountHealth(session.workspace.id);
   });
 }
+
 
 

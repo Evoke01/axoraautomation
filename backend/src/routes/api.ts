@@ -82,10 +82,16 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return { url };
   });
 
-  app.get("/connections/youtube/callback", async (request) => {
-    const query = z.object({ state: z.string().min(1), code: z.string().min(1) }).parse(request.query);
-    const account = await app.services.youtube.handleCallback(query.state, query.code);
-    return { connected: true, account };
+  app.get("/connections/youtube/callback", async (request, reply) => {
+    const frontendUrl = app.services.env.FRONTEND_APP_URL ?? "http://localhost:5173";
+    try {
+      const query = z.object({ state: z.string().min(1), code: z.string().min(1) }).parse(request.query);
+      await app.services.youtube.handleCallback(query.state, query.code);
+      return reply.redirect(${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=success);
+    } catch (err) {
+      request.log.error(err);
+      return reply.redirect(${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=error);
+    }
   });
 
   // UPLOADS
@@ -173,6 +179,7 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.getAccountHealth(session.workspace.id);
   });
 }
+
 
 
 

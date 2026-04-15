@@ -9,73 +9,28 @@ import {
 } from "../types/domain.js";
 
 export async function registerApiRoutes(app: FastifyInstance) {
-  // Allow empty JSON bodies (e.g. POST with no payload)
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
-    if (!body || body === '') { done(null, {}); return; }
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    if (!body || body === "") { done(null, {}); return; }
     try { done(null, JSON.parse(body as string)); } catch (e) { done(e as Error, undefined); }
   });
 
-  // AUTH
   app.post("/auth/session/resolve", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return { user: session.user, workspace: session.workspace, creator: session.creator, entitlements: session.entitlements };
   });
 
-  // CONNECTIONS - list all for workspace
   app.get("/connections", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
-    const accounts = await app.services.prisma.connectedAccount.findMany({
-      where: { workspaceId: session.workspace.id },
-      orderBy: { createdAt: "asc" }
-    });
-
-    const PLATFORM_META: Record<string, { label: string; note: string; connectable: boolean }> = {
-      YOUTUBE:   { label: "YouTube",   note: "Ready for channel OAuth, uploads, and metrics polling.", connectable: true },
-      INSTAGRAM: { label: "Instagram", note: "Missing OAuth credentials in the backend environment.", connectable: false },
-      TIKTOK:    { label: "TikTok",    note: "Content Posting API access required.", connectable: false },
-      LINKEDIN:  { label: "LinkedIn",  note: "Video posting requires allowlist approval.", connectable: false },
-      X:         { label: "X (Twitter)", note: "Posting requires paid API tier.", connectable: false },
-    };
-
-    const allPlatforms = ["YOUTUBE", "INSTAGRAM", "TIKTOK", "LINKEDIN", "X"];
-
-    return allPlatforms.map((platform) => {
-      const meta = PLATFORM_META[platform]!;
-      const platformAccounts = accounts.filter(a => a.platform === platform);
-      const connected = platformAccounts.some(a => a.status === "ACTIVE");
-      return {
-        platform,
-        label: meta.label,
-        note: meta.note,
-        connectable: meta.connectable,
-        connected,
-        accounts: platformAccounts.map(a => ({
-          id: a.id,
-          accountLabel: a.accountLabel,
-          status: a.status,
-          externalAccountId: a.externalAccountId,
-          tokenExpiresAt: a.tokenExpiresAt
-        }))
-      };
-    });
+    return app.services.connections.list(session.workspace.id);
   });
 
-  // CONNECTIONS - disconnect
   app.delete("/connections/:id", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
-    const account = await app.services.prisma.connectedAccount.findUnique({ where: { id: params.id } });
-    if (!account || account.workspaceId !== session.workspace.id) {
-      return { disconnected: false, error: "Account not found." };
-    }
-    await app.services.prisma.connectedAccount.update({
-      where: { id: params.id },
-      data: { status: "DISCONNECTED", accessTokenEncrypted: null, refreshTokenEncrypted: null }
-    });
-    return { disconnected: true };
+    const account = await app.services.connections.disconnect(params.id, session.user.id);
+    return { disconnected: Boolean(account) };
   });
 
-  // YOUTUBE OAUTH
   app.post("/connections/youtube/start", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     const url = await app.services.youtube.getAuthorizationUrl(session.workspace.id);
@@ -94,16 +49,11 @@ export async function registerApiRoutes(app: FastifyInstance) {
     }
   });
 
-  // UPLOADS
   app.post("/uploads/multipart/init", async (request) => {
     await app.services.auth.resolveSession(request.headers);
     const body = uploadInitSchema.parse(request.body);
     const session = await app.services.uploads.initMultipartUpload(body);
-    return {
-      uploadSessionId: session.id,
-      uploadId: session.multipartUploadId,
-      objectKey: session.objectKey,
-    };
+    return { uploadSessionId: session.id, uploadId: session.multipartUploadId, objectKey: session.objectKey };
   });
 
   app.post("/uploads/multipart/part-url", async (request) => {
@@ -118,7 +68,6 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.uploads.completeMultipartUpload(body);
   });
 
-  // ASSETS
   app.get("/assets", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.listAssets(session.workspace.id);
@@ -158,7 +107,6 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return { updated: true };
   });
 
-  // POSTS & DASHBOARD
   app.get("/posts", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.listPosts(session.workspace.id);
@@ -179,10 +127,3 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.getAccountHealth(session.workspace.id);
   });
 }
-
-
-
-
-
-
-

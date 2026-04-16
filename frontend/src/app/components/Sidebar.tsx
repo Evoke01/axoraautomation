@@ -27,10 +27,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     <>
       <div className="p-6 border-b border-white/10 relative overflow-hidden">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-rose-500 flex items-center justify-center shadow-lg shadow-rose-500/30">
             <Zap size={16} className="text-zinc-950 fill-zinc-950" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 via-cyan-400 to-violet-400 bg-clip-text text-transparent drop-shadow-sm">
+          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 via-white/90 to-rose-400 bg-clip-text text-transparent drop-shadow-sm">
             Axora
           </h1>
         </div>
@@ -54,9 +54,9 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               } relative overflow-hidden group`}
             >
               {isActive && (
-                <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/20 via-cyan-500/20 to-violet-500/20 pointer-events-none" />
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/20 via-violet-500/20 to-rose-500/20 pointer-events-none" />
               )}
-              <Icon size={18} className={isActive ? 'text-cyan-400' : 'text-zinc-500 group-hover:text-cyan-400/70 transition-colors'} />
+              <Icon size={18} className={isActive ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-indigo-400/70 transition-colors'} />
               <span className="relative z-10 font-medium flex-1 text-left">{item.label}</span>
             </button>
           );
@@ -72,10 +72,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             <div className="text-xs font-medium text-zinc-300 truncate">Evoke</div>
             <div className="text-xs text-zinc-600 truncate">evoke@axora.ai</div>
           </div>
-          <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] flex-shrink-0" />
+          <div className="w-2 h-2 rounded-full bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.8)] flex-shrink-0" />
         </div>
         <div className="text-xs text-zinc-600 space-y-1 px-2 pt-1 border-t border-white/5">
-          <div className="flex justify-between"><span>Plan</span><span className="text-emerald-400 font-medium">Pro</span></div>
+          <div className="flex justify-between"><span>Plan</span><span className="text-rose-400 font-medium">Pro</span></div>
           <div className="flex justify-between"><span>Platforms</span><span className="text-zinc-400">YouTube</span></div>
         </div>
       </div>

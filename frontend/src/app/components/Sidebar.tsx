@@ -25,9 +25,19 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
   const navContent = (
     <>
-      <div className="p-6 border-b border-white/10 relative overflow-hidden flex flex-col items-center">
-        <img src="/assets/logo-full.png" alt="Axora" className="h-10 w-auto" />
-        <p className="text-[10px] font-medium text-zinc-500 mt-2 uppercase tracking-[0.2em]">
+      <div className="p-4 border-b border-white/10 relative overflow-hidden">
+        <div className="flex items-center gap-3 p-2 rounded-2xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm">
+          <div className="relative group">
+            <img 
+              src="/assets/logo-full.png" 
+              alt="Axora" 
+              className="h-8 w-auto mix-blend-screen brightness-110 contrast-125 transition-all duration-300" 
+            />
+            {/* Ambient glow behind logo */}
+            <div className="absolute inset-0 bg-indigo-500/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+          </div>
+        </div>
+        <p className="text-[9px] font-bold text-zinc-600 mt-2 uppercase tracking-[0.3em] pl-3">
           Autonomous engine
         </p>
       </div>

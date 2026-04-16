@@ -29,6 +29,15 @@ export class AssetService {
       throw new ValidationError("Upload has not completed yet.");
     }
 
+    const existingAsset = await this.prisma.asset.findFirst({
+      where: { uploadSessionId: upload.id },
+      include: { files: true }
+    });
+
+    if (existingAsset) {
+      return existingAsset;
+    }
+
     const asset = await this.prisma.asset.create({
       data: {
         workspaceId: input.workspaceId,

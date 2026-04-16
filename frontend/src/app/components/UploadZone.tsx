@@ -28,6 +28,8 @@ export function UploadZone({ session, onUploaded }: Props) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isProcessingRef = useRef(false);
+
   const isUploading = step >= 0;
 
   function advanceTo(index: number) {
@@ -36,6 +38,8 @@ export function UploadZone({ session, onUploaded }: Props) {
   }
 
   async function handleFile(file: File) {
+    if (isProcessingRef.current) return;
+    
     if (!session?.workspace?.id || !session?.creator?.id) {
       setError('Session not ready. Try refreshing.');
       return;
@@ -46,6 +50,7 @@ export function UploadZone({ session, onUploaded }: Props) {
     if (!file.type.startsWith('video/')) { setError('Please upload a video file.'); return; }
 
     setError(null);
+    isProcessingRef.current = true;
     advanceTo(0);
 
     try {
@@ -102,7 +107,6 @@ export function UploadZone({ session, onUploaded }: Props) {
       advanceTo(4);
       await delay(1200);
       advanceTo(5);
-      await api.assets.plan(asset.id);
       await delay(800);
       advanceTo(6);
       await delay(1000);
@@ -110,10 +114,12 @@ export function UploadZone({ session, onUploaded }: Props) {
       setCompletedSteps(STEPS);
       setStep(-1);
       setUploadProgress(0);
+      isProcessingRef.current = false;
       onUploaded?.();
     } catch (err) {
       setStep(-1);
       setUploadProgress(0);
+      isProcessingRef.current = false;
       setError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
     }
   }

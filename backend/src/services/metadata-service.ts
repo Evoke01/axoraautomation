@@ -1,4 +1,4 @@
-﻿import crypto from "node:crypto";
+import crypto from "node:crypto";
 
 import { Platform, type PrismaClient } from "@prisma/client";
 
@@ -44,7 +44,8 @@ export class MetadataService {
       include: {
         creator: true,
         files: true,
-        tags: true
+        tags: true,
+        intelligence: true
       }
     });
 
@@ -122,21 +123,35 @@ export class MetadataService {
 
   private async generateWithAI(
     ai: InstanceType<typeof import("openai").default>,
-    asset: { title: string; rawNotes: string | null; creator: { niche: string | null; brandVoice: string | null; name: string } },
+    asset: { title: string; rawNotes: string | null; creator: { niche: string | null; brandVoice: string | null; name: string }; intelligence?: any },
     file: { durationSeconds: number | null }
   ): Promise<AIVariant[]> {
     const fileShape = file.durationSeconds && file.durationSeconds <= 60 ? "short-form" : "long-form";
 
-    const systemPrompt = `You are Axora. Generate YouTube metadata for a creator video. Return ONLY a JSON object (no markdown). Keys: variantKey ("primary"), title (max 70 chars), hook (1 sentence), caption (2 sentences), cta (short), hashtags (array of 4), keywords (array of 5).`;
+    const systemPrompt = `You are Axora, a world-class YouTube growth strategist. 
+    Your mission is to generate metadata that "blows up" using high-intensity hooks, curiosity gaps, and trending styles.
+    Eliminate boring corporate-speak. Use "Power Words" and focus on the ONE big thing that makes this video unique.
+    
+    Return ONLY a JSON array of 3 objects. 
+    Keys: variantKey ("viral", "curiosity", "direct"), title (max 50 chars, punchy), hook (1 sentence), caption (max 150 chars), cta (short), hashtags (array of 4), keywords (array of 5).`;
+
+    const intelligenceInfo = asset.intelligence ? `
+    ACTUAL VIDEO CONTENT (SCANNED):
+    - Hook: ${asset.intelligence.hook}
+    - Main Point: ${asset.intelligence.mainPoint}
+    - Vibe: ${asset.intelligence.vibe}
+    - Specific Topics: ${asset.intelligence.keywords?.join(", ")}
+    ` : "No video scan available yet.";
 
     const userPrompt = `Creator: ${asset.creator.name}
-Niche: ${asset.creator.niche ?? "general"}
-Brand voice: ${asset.creator.brandVoice ?? "authentic and engaging"}
-Video title: ${asset.title}
-Notes: ${asset.rawNotes ?? "none"}
-Format: ${fileShape} (${file.durationSeconds ?? "unknown"}s)
+    Niche: ${asset.creator.niche ?? "general"}
+    Brand voice: ${asset.creator.brandVoice ?? "bold and energetic"}
+    ${intelligenceInfo}
+    Video title: ${asset.title}
+    Notes: ${asset.rawNotes ?? "none"}
+    Format: ${fileShape} (${file.durationSeconds ?? "unknown"}s)
 
-Generate 3 metadata variants.`;
+    Generate 3 distinct metadata variants optimized for high CTR.`;
 
     const response = await ai.chat.completions.create({
       model: env.OPENAI_MODEL,
@@ -144,8 +159,8 @@ Generate 3 metadata variants.`;
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      temperature: 0.8,
-      max_tokens: 500
+      temperature: 0.9,
+      max_tokens: 800
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? "[]";
@@ -185,32 +200,32 @@ Generate 3 metadata variants.`;
 
     return [
       {
-        variantKey: "primary",
-        title: `${asset.title}: ${hookBase} Playbook`,
-        hook: `The ${hookBase.toLowerCase()} angle creators keep missing`,
-        caption: `${asset.title}\n\nBuilt for ${fileShape} attention. Focus: ${contentCategory}.`,
-        cta: "Follow Axora for the next distribution wave.",
-        thumbnailBrief: `High-contrast thumbnail featuring ${contentCategory} and one bold promise about ${hookBase.toLowerCase()}.`,
+        variantKey: "viral",
+        title: `CRACKED: ${titleCase(keywordPool[0] ?? "This strategy")} finally revealed`,
+        hook: `The ${hookBase.toLowerCase()} angle that ${asset.creator.name} is using to dominate`,
+        caption: `Forget everything you know about ${contentCategory.toLowerCase()}. We just found the ultimate shortcut.`,
+        cta: "Join Axora for the full distribution wave.",
+        thumbnailBrief: `High-contrast thumbnail featuring ${contentCategory} and the word 'CRACKED'.`,
         hashtags: keywordPool.slice(0, 4).map((keyword) => `#${keyword}`),
         keywords: keywordPool
       },
       {
         variantKey: "curiosity",
-        title: `Why ${titleCase(keywordPool[0] ?? "this niche")} is opening up right now`,
-        hook: `Nobody is timing ${contentCategory.toLowerCase()} correctly yet`,
-        caption: `This upload is framed around a whitespace opportunity in ${contentCategory.toLowerCase()}.`,
-        cta: "Watch the full breakdown and track the next move.",
-        thumbnailBrief: `Minimal thumbnail with a single whitespace claim and a sharp contrast number.`,
+        title: `Stop failing at ${titleCase(keywordPool[0] ?? "this niche")} right now`,
+        hook: `Nobody is timing ${contentCategory.toLowerCase()} correctly, except for this`,
+        caption: `We found a massive whitespace opportunity in ${contentCategory.toLowerCase()}. Watch till the end.`,
+        cta: "Unlock the next move with Axora.",
+        thumbnailBrief: `Minimal thumbnail with the word 'STOP' and a sharp contrast number.`,
         hashtags: keywordPool.slice(0, 3).map((keyword) => `#${keyword}`),
         keywords: keywordPool.slice(0, 5)
       },
       {
         variantKey: "direct",
-        title: `${contentCategory} in ${Math.max(1, Math.round(file.durationSeconds ?? 30))} seconds`,
-        hook: `${asset.title} with a sharper outcome`,
-        caption: `Direct version for high-intent viewers. Angle: ${hookBase}.`,
-        cta: "Save this before the next repackaged drop.",
-        thumbnailBrief: `Outcome-first thumbnail with creator face optional and no more than four words.`,
+        title: `How to MASTER ${contentCategory} (${Math.max(1, Math.round(file.durationSeconds ?? 30))}s)`,
+        hook: `${asset.title}: The only guide you need`,
+        caption: `No fluff. Just the facts about ${hookBase}. This is ${fileShape} excellence.`,
+        cta: "Save this before it goes viral.",
+        thumbnailBrief: `Outcome-first thumbnail with sharp text and zero distractions.`,
         hashtags: keywordPool.slice(0, 2).map((keyword) => `#${keyword}`),
         keywords: keywordPool.slice(0, 4)
       }

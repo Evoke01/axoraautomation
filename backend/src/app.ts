@@ -19,6 +19,7 @@ import { createWorker, registerRecurringJobs } from "./queues/runtime.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { AssetService } from "./services/asset-service.js";
 import { AssetValidationService } from "./services/asset-validation-service.js";
+import { IntelligenceService } from "./services/intelligence-service.js";
 import { AuditService } from "./services/audit-service.js";
 import { AuthService } from "./services/auth-service.js";
 import { CampaignService } from "./services/campaign-service.js";
@@ -40,6 +41,7 @@ export type AppServices = {
   uploads: UploadService;
   assets: AssetService;
   validation: AssetValidationService;
+  intelligence: IntelligenceService;
   metadata: MetadataService;
   quota: QuotaService;
   campaigns: CampaignService;
@@ -68,6 +70,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const uploads = new UploadService(prisma, storage);
   const assets = new AssetService(prisma, queue, audit);
   const validation = new AssetValidationService(prisma, storage, audit);
+  const intelligence = new IntelligenceService(prisma, storage);
   const metadata = new MetadataService(prisma);
   const quota = new QuotaService(prisma);
   const campaigns = new CampaignService(prisma, queue, audit);
@@ -89,6 +92,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     uploads,
     assets,
     validation,
+    intelligence,
     metadata,
     quota,
     campaigns,

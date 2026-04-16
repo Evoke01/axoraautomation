@@ -21,6 +21,7 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().min(1),
   S3_PUBLIC_BASE_URL: z.string().url().optional().or(z.literal("")),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(false),
+  GEMINI_API_KEY: z.string().min(1),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().url().optional(),

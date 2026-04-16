@@ -54,7 +54,12 @@ export function createWorker(services: AppServices) {
           await services.queue.add(JobName.AssetAnalyze, { assetId });
           break;
         }
-        case JobName.AssetAnalyze:
+        case JobName.AssetAnalyze: {
+          const assetId = asString(job.data.assetId);
+          await services.intelligence.analyzeVideo(assetId);
+          await services.queue.add(JobName.MetadataGenerate, { assetId });
+          break;
+        }
         case JobName.MetadataGenerate: {
           const assetId = asString(job.data.assetId);
           await services.metadata.generate(assetId);

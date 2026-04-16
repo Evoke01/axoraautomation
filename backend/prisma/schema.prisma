@@ -263,6 +263,7 @@ model Asset {
   optimization       OptimizationSnapshot[]
   overrides          Override[]
   auditLogs          AuditLog[]
+  intelligence       Json?
 }
 
 model AssetFile {

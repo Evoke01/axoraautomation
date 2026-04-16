@@ -43,6 +43,7 @@ export function LoadingScreen() {
               className="w-1.5 h-1.5 rounded-full bg-emerald-500"
             />
           ))}
+          </div>
         </div>
       </motion.div>
     </div>

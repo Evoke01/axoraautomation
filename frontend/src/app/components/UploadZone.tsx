@@ -3,7 +3,7 @@ import { Upload, Film, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api, type ApiSession } from '../lib/api';
 
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB per part
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per part (S3 minimum)
 
 const STEPS = [
   'Validating video',

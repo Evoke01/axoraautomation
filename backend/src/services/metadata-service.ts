@@ -44,8 +44,7 @@ export class MetadataService {
       include: {
         creator: true,
         files: true,
-        tags: true,
-        intelligence: true
+        tags: true
       }
     });
 
@@ -184,7 +183,7 @@ export class MetadataService {
   }
 
   private generateHeuristic(
-    asset: { title: string; rawNotes: string | null; creator: { niche: string | null; brandVoice: string | null } },
+    asset: { title: string; rawNotes: string | null; creator: { name: string; niche: string | null; brandVoice: string | null } },
     file: { durationSeconds: number | null }
   ): AIVariant[] {
     const keywordPool = extractKeywords([

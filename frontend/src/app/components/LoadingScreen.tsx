@@ -21,12 +21,14 @@ export function LoadingScreen() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5, duration: 0.8 }}
-        className="mt-8 flex flex-col items-center gap-2"
+        className="mt-8 flex flex-col items-center gap-4"
       >
-        <div className="text-zinc-400 text-sm font-medium tracking-[0.3em] uppercase">
-          Initializing Neural Engine
-        </div>
-        <div className="flex gap-1">
+        <img src="/assets/logo-full.png" alt="Axora" className="h-12 w-auto" />
+        <div className="flex flex-col items-center gap-2">
+          <div className="text-zinc-500 text-[10px] font-medium tracking-[0.4em] uppercase">
+            Initializing Neural Engine
+          </div>
+          <div className="flex gap-1">
           {[0, 1, 2].map((i) => (
             <motion.div
               key={i}

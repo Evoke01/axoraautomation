@@ -76,8 +76,12 @@ export function UploadZone({ session, onUploaded }: Props) {
         const res = await fetch(url, { method: 'PUT', body: chunk });
         if (!res.ok) throw new Error(`Part ${partNumber} upload failed`);
 
-        const etag = res.headers.get('ETag') ?? '';
-        parts.push({ ETag: etag.replace(/"/g, ''), PartNumber: partNumber });
+        const etag = res.headers.get('ETag');
+        if (!etag) {
+          throw new Error('Connection error: ETag missing from response. Please check storage CORS settings.');
+        }
+
+        parts.push({ etag: etag.replace(/"/g, ''), partNumber });
 
         setUploadProgress(Math.round((partNumber / totalParts) * 100));
       }

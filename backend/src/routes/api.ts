@@ -51,9 +51,13 @@ export async function registerApiRoutes(app: FastifyInstance) {
   });
 
   app.post("/uploads/multipart/init", async (request) => {
-    await app.services.auth.resolveSession(request.headers);
+    const sessionAuth = await app.services.auth.resolveSession(request.headers);
     const body = uploadInitSchema.parse(request.body);
     const session = await app.services.uploads.initMultipartUpload(body);
+    
+    // Piggyback sweep to clean up old files in the background
+    app.services.purge.sweepWorkspace(sessionAuth.workspace.id).catch((err) => request.log.error(err));
+    
     return { uploadSessionId: session.id, uploadId: session.multipartUploadId, objectKey: session.objectKey };
   });
 
@@ -115,6 +119,10 @@ export async function registerApiRoutes(app: FastifyInstance) {
 
   app.get("/dashboard/summary", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
+    
+    // Piggyback sweep to clean up old files in the background when the dashboard is loaded
+    app.services.purge.sweepWorkspace(session.workspace.id).catch((err) => request.log.error(err));
+    
     return app.services.dashboard.getSummary(session.workspace.id);
   });
 

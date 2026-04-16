@@ -27,6 +27,7 @@ import { ConnectionService } from "./services/connection-service.js";
 import { DashboardService } from "./services/dashboard-service.js";
 import { MetadataService } from "./services/metadata-service.js";
 import { OptimizationService } from "./services/optimization-service.js";
+import { StoragePurgeService } from "./services/storage-purge-service.js";
 import { QuotaService } from "./services/quota-service.js";
 import { UploadService } from "./services/upload-service.js";
 
@@ -44,6 +45,7 @@ export type AppServices = {
   intelligence: IntelligenceService;
   metadata: MetadataService;
   quota: QuotaService;
+  purge: StoragePurgeService;
   campaigns: CampaignService;
   optimization: OptimizationService;
   dashboard: DashboardService;
@@ -73,6 +75,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const intelligence = new IntelligenceService(prisma, storage);
   const metadata = new MetadataService(prisma);
   const quota = new QuotaService(prisma);
+  const purge = new StoragePurgeService(prisma, storage);
   const campaigns = new CampaignService(prisma, queue, audit);
   const optimization = new OptimizationService(prisma);
   const dashboard = new DashboardService(prisma);
@@ -95,6 +98,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     intelligence,
     metadata,
     quota,
+    purge,
     campaigns,
     optimization,
     dashboard,

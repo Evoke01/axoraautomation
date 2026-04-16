@@ -24,7 +24,7 @@ export default function App() {
   }, []);
 
   function handleUploaded() {
-    setDashboardKey(k => k + 1);
+    setDashboardKey((k: number) => k + 1);
   }
 
   return (

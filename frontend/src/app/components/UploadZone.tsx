@@ -86,7 +86,7 @@ export function UploadZone({ session, onUploaded }: Props) {
           throw new Error('Connection error: ETag missing from response. Please check storage CORS settings.');
         }
 
-        parts.push({ etag: etag.replace(/"/g, ''), partNumber });
+        parts.push({ ETag: etag.replace(/"/g, ''), PartNumber: partNumber });
 
         setUploadProgress(Math.round((partNumber / totalParts) * 100));
       }

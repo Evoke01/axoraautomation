@@ -138,5 +138,10 @@ export const api = {
 
   health: {
     check: () => request<{ status: string }>("/health"),
+  },
+
+  intelligence: {
+    weekly: () => request<{ report: { opportunities: any[]; competitors: any[] }; generatedAt: string } | null>("/intelligence/weekly"),
+    generate: () => request<{ success: boolean }>("/intelligence/generate", { method: "POST" }),
   }
 };

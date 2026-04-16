@@ -131,6 +131,12 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.latestOpportunityReport(session.workspace.id);
   });
 
+  app.post("/intelligence/generate", async (request) => {
+    const session = await app.services.auth.resolveSession(request.headers);
+    const report = await app.services.optimization.generateOpportunityReport(session.workspace.id, session.workspace.timezone);
+    return { success: true, report };
+  });
+
   app.get("/health/accounts", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.getAccountHealth(session.workspace.id);

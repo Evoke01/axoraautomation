@@ -104,6 +104,49 @@ export class OptimizationService {
       take: 20
     });
 
+    const competitors = competitorSignals.slice(0, 5).map((signal) => ({
+      name: signal.competitorChannel.name,
+      followers: "Unknown", 
+      engagement: "N/A", 
+      posts: signal.postingWindow,
+      trend: signal.engagementBand.includes("High") ? "up" : signal.engagementBand.includes("Low") ? "down" : "stable"
+    }));
+
+    const opportunities = [];
+
+    if (competitorSignals.length > 0) {
+      opportunities.push({
+        type: "Gap",
+        priority: "high",
+        title: `Upload window gap: ${competitorSignals[0].postingWindow}`,
+        description: `Competitors are active during this window. Analyzing patterns shows potential whitespace.`,
+        action: `Schedule next content for the ${competitorSignals[0].postingWindow} slot`,
+        platform: competitorSignals[0].competitorChannel.platform
+      });
+
+      if (competitorSignals.length > 1) {
+        opportunities.push({
+          type: "Trend",
+          priority: "medium",
+          title: `Format gaining traction: ${competitorSignals[1].formatType}`,
+          description: `Competing creators utilizing ${competitorSignals[1].hookStyle} hooks are testing this format.`,
+          action: `Repackage upcoming content to trial ${competitorSignals[1].formatType} formats`,
+          platform: competitorSignals[1].competitorChannel.platform
+        });
+      }
+    }
+
+    if (topPosts.length > 0) {
+      opportunities.push({
+        type: "Saturation",
+        priority: "low",
+        title: `Current top asset performing well: ${topPosts[0].asset.title}`,
+        description: `Your piece is outperforming baselines. Monitor for fatigue.`,
+        action: `Double down on the hooks used in this topic`,
+        platform: topPosts[0].platform
+      });
+    }
+
     return this.prisma.opportunityReport.create({
       data: {
         workspaceId,
@@ -111,15 +154,8 @@ export class OptimizationService {
         periodEnd: end,
         status: "generated",
         report: {
-          topAssets: topPosts.map((post) => ({
-            title: post.asset.title,
-            views: post.snapshots[0]?.views ?? 0
-          })),
-          whitespace: competitorSignals.slice(0, 5).map((signal) => ({
-            category: signal.contentCategory,
-            postingWindow: signal.postingWindow,
-            hookStyle: signal.hookStyle
-          }))
+          opportunities,
+          competitors
         }
       }
     });

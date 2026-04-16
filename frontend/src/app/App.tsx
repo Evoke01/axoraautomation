@@ -9,23 +9,28 @@ import { CompetitiveIntel } from './components/CompetitiveIntel';
 import { Settings } from './components/Settings';
 import { Queue } from './components/Queue';
 import { CanvasBackground } from './components/CanvasBackground';
+import { LoadingScreen } from './components/LoadingScreen';
 import { api, type ApiSession } from './lib/api';
 
 export default function App() {
   const initialView = new URLSearchParams(window.location.search).get('view') ?? 'dashboard';
   const [activeView, setActiveView] = useState(initialView);
   const [session, setSession] = useState<ApiSession | null>(null);
+  const [loading, setLoading] = useState(true);
   const [dashboardKey, setDashboardKey] = useState(0);
 
   useEffect(() => {
     api.auth.resolveSession()
       .then(setSession)
-      .catch(() => setSession(null));
+      .catch(() => setSession(null))
+      .finally(() => setLoading(false));
   }, []);
 
   function handleUploaded() {
     setDashboardKey((k: number) => k + 1);
   }
+
+  if (loading) return <LoadingScreen />;
 
   return (
     <>

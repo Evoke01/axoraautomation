@@ -45,7 +45,8 @@ export async function registerApiRoutes(app: FastifyInstance) {
       return reply.redirect(`${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=success`);
     } catch (err) {
       request.log.error(err);
-      return reply.redirect(`${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=error`);
+      const message = err instanceof Error ? encodeURIComponent(err.message) : "Internal Error";
+      return reply.redirect(`${frontendUrl}?view=settings&oauthPlatform=youtube&oauthStatus=error&oauthMessage=${message}`);
     }
   });
 

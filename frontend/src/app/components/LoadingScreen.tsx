@@ -36,12 +36,9 @@ export function LoadingScreen() {
             transition={{ duration: 1, ease: "easeOut" }}
             className="relative z-10"
           >
-            <img
-              src="/assets/logo-full.png"
-              alt="Axora"
-              className="h-10 w-auto object-contain brightness-110 contrast-125"
-              style={{ filter: "drop-shadow(0 0 20px rgba(99, 102, 241, 0.3))" }}
-            />
+            <span className="text-4xl font-bold tracking-[0.2em] text-white bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40">
+              AXORA
+            </span>
           </motion.div>
 
           {/* Shimmer / Scanning Effect */}

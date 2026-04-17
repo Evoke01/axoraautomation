@@ -8,6 +8,7 @@ import { Settings } from './components/Settings';
 import { Queue } from './components/Queue';
 import { CanvasBackground } from './components/CanvasBackground';
 import { LoadingScreen } from './components/LoadingScreen';
+import { LandingView } from './components/LandingView';
 import { api, type ApiSession } from './lib/api';
 
 export default function App() {
@@ -30,6 +31,10 @@ export default function App() {
 
   if (loading) {
     return <LoadingScreen />;
+  }
+
+  if (!session) {
+    return <LandingView />;
   }
 
   return (

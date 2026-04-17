@@ -162,7 +162,7 @@ export function LandingView() {
             Content that
           </span>
           <br />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-zinc-400 via-white to-zinc-500 italic">
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-zinc-400 via-white to-zinc-500 italic pr-4 -mr-4">
             distributes itself
           </span>
         </motion.h1>

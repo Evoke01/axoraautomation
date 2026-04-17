@@ -13,6 +13,7 @@ import { api, type ApiSession } from './lib/api';
 
 export default function App() {
   const initialView = new URLSearchParams(window.location.search).get('view') ?? 'dashboard';
+  const isPreview = new URLSearchParams(window.location.search).get('preview') === 'landing';
   const [activeView, setActiveView] = useState(initialView);
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +34,7 @@ export default function App() {
     return <LoadingScreen />;
   }
 
-  if (!session) {
+  if (!session || isPreview) {
     return <LandingView />;
   }
 

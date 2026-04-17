@@ -11,6 +11,7 @@ import {
 import type { Queue } from "bullmq";
 
 import { NotFoundError, ValidationError } from "../lib/errors.js";
+import { buildJobId, getJobPolicy } from "../queues/job-policy.js";
 import { JobName } from "../queues/names.js";
 import { AuditService } from "./audit-service.js";
 
@@ -260,6 +261,14 @@ export class CampaignService {
 
   async schedulePublish(decisionId: string, scheduledFor: Date) {
     const delay = Math.max(0, scheduledFor.getTime() - Date.now());
-    await this.queue.add(JobName.PublishExecute, { decisionId }, { delay });
+    await this.queue.add(
+      JobName.PublishExecute,
+      { decisionId },
+      {
+        ...getJobPolicy(JobName.PublishExecute),
+        delay,
+        jobId: buildJobId(JobName.PublishExecute, decisionId)
+      }
+    );
   }
 }

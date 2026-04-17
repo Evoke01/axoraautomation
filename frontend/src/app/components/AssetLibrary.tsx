@@ -1,4 +1,4 @@
-import { Play, RefreshCw, Archive, ChevronDown, Loader2, Upload } from 'lucide-react';
+import { Play, RefreshCw, Archive, ChevronDown, Loader2, Upload, ExternalLink, TrendingUp, TrendingDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api, type ApiAsset } from '../lib/api';
@@ -35,6 +35,13 @@ function formatViews(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n > 0 ? n.toString() : '--';
+}
+
+function trendDirection(value: number | null): 'up' | 'down' | 'flat' {
+  if (value === null) return 'flat';
+  if (value > 0.15) return 'up';
+  if (value < -0.15) return 'down';
+  return 'flat';
 }
 
 const platformLabels: Record<string, string> = {
@@ -98,6 +105,10 @@ export function AssetLibrary() {
           const stage = getStage(asset);
           const totalViews = getTotalViews(asset);
           const allWaves = asset.campaigns.flatMap((campaign) => campaign.waves);
+          const latestConfidence = asset.youtubeContext?.channelTrend?.confidence ?? null;
+          const avgViews30d = asset.youtubeContext?.channelTrend?.avgViews30d ?? null;
+          const trendDelta = avgViews30d && totalViews > 0 ? (totalViews - avgViews30d) / avgViews30d : null;
+          const trend = trendDirection(trendDelta);
           const platforms = [
             ...new Set(
               asset.campaigns
@@ -150,6 +161,16 @@ export function AssetLibrary() {
                           {platformLabels[platform] ?? platform}
                         </span>
                       ))}
+                      {asset.youtubeContext?.genreHint && (
+                        <span className="text-xs px-2.5 py-1 bg-violet-500/20 rounded-md text-violet-300 border border-violet-400/30 font-medium">
+                          genre: {asset.youtubeContext.genreHint}
+                        </span>
+                      )}
+                      {latestConfidence !== null && (
+                        <span className="text-xs px-2.5 py-1 bg-white/10 rounded-md text-zinc-300 border border-white/10 font-medium">
+                          confidence {(latestConfidence * 100).toFixed(0)}%
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -165,6 +186,21 @@ export function AssetLibrary() {
                       className={`text-zinc-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                     />
                   </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  {trend === 'up' && (
+                    <span className="inline-flex items-center gap-1 text-emerald-400">
+                      <TrendingUp size={12} /> trend up vs 30d
+                    </span>
+                  )}
+                  {trend === 'down' && (
+                    <span className="inline-flex items-center gap-1 text-red-400">
+                      <TrendingDown size={12} /> trend down vs 30d
+                    </span>
+                  )}
+                  {asset.freshnessAt && (
+                    <span className="text-zinc-500">freshness: {timeAgo(asset.freshnessAt)}</span>
+                  )}
                 </div>
               </button>
 
@@ -220,6 +256,17 @@ export function AssetLibrary() {
                                       <span className="text-zinc-400">{engagement}</span>
                                       <span className="text-zinc-600 ml-1">eng.</span>
                                     </div>
+                                    {decision.post?.externalUrl && (
+                                      <a
+                                        href={decision.post.externalUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300"
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
+                                        video <ExternalLink size={12} />
+                                      </a>
+                                    )}
                                   </div>
                                 </div>
                               );
@@ -232,6 +279,12 @@ export function AssetLibrary() {
                         Status: {asset.status.toLowerCase().replace(/_/g, ' ')}
                         {asset.rawNotes && <span className="ml-2 text-zinc-600">| {asset.rawNotes}</span>}
                       </div>
+                      {asset.assetIntelligence?.summary && (
+                        <div className="text-sm text-zinc-400 bg-white/5 border border-white/10 rounded-lg p-3">
+                          <span className="text-zinc-500 mr-1">AI report:</span>
+                          {asset.assetIntelligence.summary}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}

@@ -1,0 +1,14 @@
+---
+description: Keep output compact without lowering build quality
+alwaysApply: true
+---
+
+# Compact Execution Quality
+
+- Keep user-facing responses concise by default.
+- Do full implementation work; do not skip validation, error handling, or tests.
+- Prefer deterministic contracts across backend/frontend (shared field names and types).
+- Use focused diffs and avoid unrelated refactors.
+- When touching queues, enforce idempotent job IDs and retry policy.
+- When touching external APIs, surface provenance/freshness in stored and returned data.
+- Before claiming done, run relevant checks and report any remaining risk explicitly.

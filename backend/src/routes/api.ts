@@ -79,9 +79,13 @@ export async function registerApiRoutes(app: FastifyInstance) {
   });
 
   app.post("/assets", async (request) => {
-    await app.services.auth.resolveSession(request.headers);
+    const session = await app.services.auth.resolveSession(request.headers);
     const body = createAssetSchema.parse(request.body);
-    return app.services.assets.createAsset(body);
+    return app.services.assets.createAsset({
+      ...body,
+      workspaceId: session.workspace.id,
+      creatorId: session.creator?.id ?? body.creatorId
+    });
   });
 
   app.get("/assets/:id", async (request) => {

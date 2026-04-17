@@ -17,10 +17,20 @@ export const uploadPartUrlSchema = z.object({
 export const uploadCompleteSchema = z.object({
   uploadSessionId: z.string().min(1),
   parts: z.array(
-    z.object({
-      partNumber: z.number().int().min(1),
-      etag: z.string().min(1)
-    })
+    z
+      .object({
+        partNumber: z.number().int().min(1).optional(),
+        etag: z.string().min(1).optional(),
+        PartNumber: z.number().int().min(1).optional(),
+        ETag: z.string().min(1).optional()
+      })
+      .transform((part) => ({
+        partNumber: part.partNumber ?? part.PartNumber ?? 0,
+        etag: part.etag ?? part.ETag ?? ""
+      }))
+      .refine((part) => part.partNumber > 0 && part.etag.length > 0, {
+        message: "Each part must include partNumber and etag."
+      })
   )
 });
 

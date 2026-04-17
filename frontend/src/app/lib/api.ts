@@ -72,11 +72,30 @@ export interface ApiAsset {
           status: string;
           publishedAt: string | null;
           externalUrl: string | null;
-          snapshots: Array<{ views: number | null; likes: number | null; comments: number | null }>;
+          externalPostId?: string | null;
+          snapshots: Array<{ views: number | null; likes: number | null; comments: number | null; capturedAt?: string }>;
         } | null;
       }>;
     }>;
   }>;
+  assetIntelligence?: {
+    summary?: string;
+    hook?: string;
+    keywords?: string[];
+  } | null;
+  youtubeContext?: {
+    externalVideoId: string;
+    genreHint: string | null;
+    channelId: string;
+    channelTrend: {
+      avgViews30d: number;
+      medianViews30d: number;
+      confidence: number;
+      computedAt: string;
+      publishingWindows: Record<string, number>;
+    } | null;
+  } | null;
+  freshnessAt?: string | null;
 }
 
 export interface ApiSession {
@@ -108,7 +127,7 @@ export const api = {
       request<{ url: string; partNumber: number }>(
         "/uploads/multipart/part-url", { method: "POST", body: JSON.stringify(body) }
       ),
-    complete: (body: { uploadSessionId: string; parts: { ETag: string; PartNumber: number }[] }) =>
+    complete: (body: { uploadSessionId: string; parts: { etag: string; partNumber: number }[] }) =>
       request<{ completed: boolean }>(
         "/uploads/multipart/complete", { method: "POST", body: JSON.stringify(body) }
       ),

@@ -6,6 +6,7 @@ import type { AppServices } from "../app.js";
 import { ValidationError } from "../lib/errors.js";
 import { withLeaderLock } from "../lib/leader-lock.js";
 import { isWeeklyReportWindow } from "../lib/time.js";
+import { buildJobId, getJobPolicy } from "./job-policy.js";
 import { JobName, QUEUE_NAME } from "./names.js";
 
 async function scheduleMetricRefresh(services: AppServices, postId: string, pollCount: number) {
@@ -16,7 +17,15 @@ async function scheduleMetricRefresh(services: AppServices, postId: string, poll
     return;
   }
 
-  await services.queue.add(JobName.MetricsRefresh, { postId }, { delay: nextDelayMinutes * 60 * 1000 });
+  await services.queue.add(
+    JobName.MetricsRefresh,
+    { postId },
+    {
+      ...getJobPolicy(JobName.MetricsRefresh),
+      delay: nextDelayMinutes * 60 * 1000,
+      jobId: buildJobId(JobName.MetricsRefresh, `${postId}:${pollCount + 1}`)
+    }
+  );
 }
 
 export async function registerRecurringJobs(services: AppServices) {
@@ -24,6 +33,7 @@ export async function registerRecurringJobs(services: AppServices) {
     JobName.OpportunityReport,
     {},
     {
+      ...getJobPolicy(JobName.OpportunityReport),
       repeat: {
         every: 60 * 60 * 1000
       },
@@ -35,41 +45,66 @@ export async function registerRecurringJobs(services: AppServices) {
     JobName.AuditRetention,
     {},
     {
+      ...getJobPolicy(JobName.AuditRetention),
       repeat: {
         every: 24 * 60 * 60 * 1000
       },
       jobId: "audit-retention-daily"
     }
   );
+
+  await services.queue.add(
+    JobName.YouTubeChannelSync,
+    {},
+    {
+      ...getJobPolicy(JobName.YouTubeChannelSync),
+      repeat: {
+        every: 6 * 60 * 60 * 1000
+      },
+      jobId: "youtube-channel-sync-6h"
+    }
+  );
 }
 
 export function createWorker(services: AppServices) {
-  return new Worker(
+  const worker = new Worker(
     QUEUE_NAME,
     async (job) => {
       switch (job.name) {
         case JobName.AssetIngest: {
           const assetId = asString(job.data.assetId);
           await services.validation.inspect(assetId);
-          await services.queue.add(JobName.AssetAnalyze, { assetId });
+          await services.queue.add(JobName.AssetAnalyze, { assetId }, {
+            ...getJobPolicy(JobName.AssetAnalyze),
+            jobId: buildJobId(JobName.AssetAnalyze, assetId)
+          });
           break;
         }
         case JobName.AssetAnalyze: {
           const assetId = asString(job.data.assetId);
           await services.intelligence.analyzeVideo(assetId);
-          await services.queue.add(JobName.MetadataGenerate, { assetId });
+          await services.queue.add(JobName.MetadataGenerate, { assetId }, {
+            ...getJobPolicy(JobName.MetadataGenerate),
+            jobId: buildJobId(JobName.MetadataGenerate, assetId)
+          });
           break;
         }
         case JobName.MetadataGenerate: {
           const assetId = asString(job.data.assetId);
           await services.metadata.generate(assetId);
-          await services.queue.add(JobName.CampaignPlan, { assetId });
+          await services.queue.add(JobName.CampaignPlan, { assetId }, {
+            ...getJobPolicy(JobName.CampaignPlan),
+            jobId: buildJobId(JobName.CampaignPlan, assetId)
+          });
           break;
         }
         case JobName.CampaignPlan: {
           const assetId = asString(job.data.assetId);
           await services.campaigns.planAsset(assetId);
-          await services.queue.add(JobName.ReviewEvaluate, { assetId });
+          await services.queue.add(JobName.ReviewEvaluate, { assetId }, {
+            ...getJobPolicy(JobName.ReviewEvaluate),
+            jobId: buildJobId(JobName.ReviewEvaluate, assetId)
+          });
           break;
         }
         case JobName.ReviewEvaluate: {
@@ -187,6 +222,21 @@ export function createWorker(services: AppServices) {
           await scheduleMetricRefresh(services, postId, pollCount);
           break;
         }
+        case JobName.YouTubeChannelSync: {
+          const workspaceId = typeof job.data.workspaceId === "string" ? job.data.workspaceId : undefined;
+          await services.youtubeHistory.syncWorkspaceChannels(workspaceId);
+          break;
+        }
+        case JobName.YouTubeVideoBackfill: {
+          const channelId = asString(job.data.channelId);
+          await services.youtubeHistory.backfillChannelVideos(channelId);
+          break;
+        }
+        case JobName.YouTubeMetricsSnapshot: {
+          const videoId = asString(job.data.videoId);
+          await services.youtubeHistory.captureVideoSnapshot(videoId);
+          break;
+        }
         case JobName.OptimizationRecompute: {
           const workspaceId = asString(job.data.workspaceId);
           await services.optimization.recompute(workspaceId);
@@ -229,6 +279,25 @@ export function createWorker(services: AppServices) {
       concurrency: 2
     }
   );
+
+  worker.on("failed", (job, error) => {
+    console.error("[queue] job_failed", {
+      id: job?.id,
+      name: job?.name,
+      attemptsMade: job?.attemptsMade,
+      error: error.message
+    });
+  });
+
+  worker.on("completed", (job) => {
+    console.info("[queue] job_completed", { id: job.id, name: job.name });
+  });
+
+  worker.on("stalled", (jobId) => {
+    console.warn("[queue] job_stalled", { id: jobId });
+  });
+
+  return worker;
 }
 
 function asString(value: unknown) {

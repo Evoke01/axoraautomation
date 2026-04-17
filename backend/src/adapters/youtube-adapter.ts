@@ -14,6 +14,16 @@ const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube"
 ];
 
+export type YouTubeChannelVideo = {
+  externalVideoId: string;
+  title: string;
+  description: string;
+  publishedAt: Date;
+  durationSeconds: number | null;
+  tags: string[];
+  rawPayload: Record<string, unknown>;
+};
+
 export class YouTubeAdapter {
   constructor(
     private readonly prisma: PrismaClient,
@@ -207,7 +217,7 @@ export class YouTubeAdapter {
       throw new NotFoundError("Distribution decision is incomplete.");
     }
 
-    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_REDIRECT_URI) {
+    if (this.shouldUseMock()) {
       return this.publishMock(decisionId);
     }
 
@@ -342,7 +352,10 @@ export class YouTubeAdapter {
     const accountId = posts[0]?.connectedAccountId;
     const externalIds = posts.map((post) => post.externalPostId).filter(Boolean) as string[];
 
-    if (!accountId || externalIds.length === 0 || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+    if (!accountId || externalIds.length === 0 || this.shouldUseMock()) {
+      if (!this.shouldUseMock()) {
+        return [];
+      }
       return posts.map((post) => ({
         postId: post.id,
         metrics: {
@@ -379,4 +392,111 @@ export class YouTubeAdapter {
       };
     });
   }
+
+  async listOwnChannelVideos(accountId: string, maxResults = 50): Promise<YouTubeChannelVideo[]> {
+    if (this.shouldUseMock()) {
+      return [];
+    }
+
+    const client = await this.ensureFresh(accountId, 30);
+    const youtube = google.youtube({ version: "v3", auth: client });
+    const channelResponse = await youtube.channels.list({
+      mine: true,
+      part: ["contentDetails"]
+    });
+    const uploadsPlaylistId = channelResponse.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+    if (!uploadsPlaylistId) {
+      return [];
+    }
+
+    const playlistItems = await youtube.playlistItems.list({
+      playlistId: uploadsPlaylistId,
+      part: ["snippet", "contentDetails"],
+      maxResults
+    });
+
+    const videoIds = playlistItems.data.items
+      ?.map((item) => item.contentDetails?.videoId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0) ?? [];
+
+    if (videoIds.length === 0) {
+      return [];
+    }
+
+    const videosResponse = await youtube.videos.list({
+      id: videoIds,
+      part: ["snippet", "contentDetails", "statistics"]
+    });
+
+    return (
+      videosResponse.data.items?.map((video) => {
+        const rawPayload = JSON.parse(JSON.stringify(video)) as Record<string, unknown>;
+        return {
+          externalVideoId: video.id ?? "",
+          title: video.snippet?.title ?? "Untitled",
+          description: video.snippet?.description ?? "",
+          publishedAt: video.snippet?.publishedAt ? new Date(video.snippet.publishedAt) : new Date(),
+          durationSeconds: parseIsoDurationToSeconds(video.contentDetails?.duration),
+          tags: video.snippet?.tags ?? [],
+          rawPayload
+        };
+      }).filter((video) => video.externalVideoId.length > 0) ?? []
+    );
+  }
+
+  async getVideoMetrics(accountId: string, externalVideoIds: string[]) {
+    if (externalVideoIds.length === 0) {
+      return [];
+    }
+
+    if (this.shouldUseMock()) {
+      return [];
+    }
+
+    const client = await this.ensureFresh(accountId, 30);
+    const youtube = google.youtube({ version: "v3", auth: client });
+    const response = await youtube.videos.list({
+      part: ["statistics"],
+      id: externalVideoIds
+    });
+
+    return (
+      response.data.items?.map((item) => ({
+        externalVideoId: item.id ?? "",
+        views: Number(item.statistics?.viewCount ?? 0),
+        likes: Number(item.statistics?.likeCount ?? 0),
+        comments: Number(item.statistics?.commentCount ?? 0),
+        rawMetrics: JSON.parse(JSON.stringify(item.statistics ?? {})) as Record<string, unknown>
+      })).filter((item) => item.externalVideoId.length > 0) ?? []
+    );
+  }
+
+  private shouldUseMock() {
+    const credentialsConfigured = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI);
+    return canUseYouTubeMock({
+      credentialsConfigured,
+      allowMock: env.YOUTUBE_ALLOW_MOCK,
+      nodeEnv: env.NODE_ENV
+    });
+  }
+}
+
+function parseIsoDurationToSeconds(duration: string | undefined): number | null {
+  if (!duration) {
+    return null;
+  }
+
+  const matches = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!matches) {
+    return null;
+  }
+
+  const hours = Number(matches[1] ?? 0);
+  const minutes = Number(matches[2] ?? 0);
+  const seconds = Number(matches[3] ?? 0);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+export function canUseYouTubeMock(input: { credentialsConfigured: boolean; allowMock: boolean; nodeEnv: string }) {
+  return !input.credentialsConfigured && input.allowMock && input.nodeEnv !== "production";
 }

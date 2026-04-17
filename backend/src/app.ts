@@ -30,6 +30,7 @@ import { OptimizationService } from "./services/optimization-service.js";
 import { StoragePurgeService } from "./services/storage-purge-service.js";
 import { QuotaService } from "./services/quota-service.js";
 import { UploadService } from "./services/upload-service.js";
+import { YouTubeHistoryService } from "./services/youtube-history-service.js";
 
 export type AppServices = {
   env: typeof env;
@@ -53,6 +54,7 @@ export type AppServices = {
   youtube: YouTubeAdapter;
   instagram: InstagramAdapter;
   tiktok: TikTokAdapter;
+  youtubeHistory: YouTubeHistoryService;
 };
 
 export async function buildApp(): Promise<FastifyInstance & { services: AppServices }> {
@@ -81,6 +83,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const dashboard = new DashboardService(prisma);
   const connections = new ConnectionService(prisma, audit);
   const youtube = new YouTubeAdapter(prisma, storage, audit);
+  const youtubeHistory = new YouTubeHistoryService(prisma, queue, youtube);
   const instagram = new InstagramAdapter(prisma, audit);
   const tiktok = new TikTokAdapter(prisma, audit);
 
@@ -104,6 +107,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     dashboard,
     connections,
     youtube,
+    youtubeHistory,
     instagram,
     tiktok
   });

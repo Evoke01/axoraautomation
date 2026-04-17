@@ -8,6 +8,9 @@ export const JobName = {
   ReviewEvaluate: "review.evaluate",
   PublishExecute: "publish.execute",
   MetricsRefresh: "metrics.refresh",
+  YouTubeChannelSync: "youtube.channel.sync",
+  YouTubeVideoBackfill: "youtube.video.backfill",
+  YouTubeMetricsSnapshot: "youtube.metrics.snapshot",
   OptimizationRecompute: "optimization.recompute",
   OpportunityReport: "opportunity.report",
   AuditRetention: "audit.retention"

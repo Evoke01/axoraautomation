@@ -44,21 +44,23 @@ export class DashboardService {
   }
 
   async listAssets(workspaceId: string) {
-    return this.prisma.asset.findMany({
-      where: { workspaceId },
-      include: {
-        tags: true,
-        campaigns: {
-          include: {
-            waves: {
-              include: {
-                decisions: {
-                  include: {
-                    post: {
-                      include: {
-                        snapshots: {
-                          orderBy: { capturedAt: "desc" },
-                          take: 1
+    const [assets, channelTrends, youtubeVideos] = await Promise.all([
+      this.prisma.asset.findMany({
+        where: { workspaceId },
+        include: {
+          tags: true,
+          campaigns: {
+            include: {
+              waves: {
+                include: {
+                  decisions: {
+                    include: {
+                      post: {
+                        include: {
+                          snapshots: {
+                            orderBy: { capturedAt: "desc" },
+                            take: 3
+                          }
                         }
                       }
                     }
@@ -67,9 +69,62 @@ export class DashboardService {
               }
             }
           }
-        }
-      },
-      orderBy: { createdAt: "desc" }
+        },
+        orderBy: { createdAt: "desc" }
+      }),
+      this.prisma.channelTrendWindow.findMany({
+        where: { workspaceId, windowDays: 30 },
+        include: { channel: true },
+        orderBy: { computedAt: "desc" }
+      }),
+      this.prisma.youtubeVideo.findMany({
+        where: { workspaceId },
+        orderBy: { publishedAt: "desc" },
+        take: 500
+      })
+    ]);
+
+    const trendByChannelId = new Map<string, (typeof channelTrends)[number]>();
+    for (const trend of channelTrends) {
+      if (!trendByChannelId.has(trend.channelId)) {
+        trendByChannelId.set(trend.channelId, trend);
+      }
+    }
+
+    const youtubeVideoByExternalId = new Map(youtubeVideos.map((video) => [video.externalVideoId, video] as const));
+    return assets.map((asset) => {
+      const decisions = asset.campaigns.flatMap((campaign) => campaign.waves).flatMap((wave) => wave.decisions);
+      const youtubeDecision = decisions.find((decision) => decision.platform === "YOUTUBE" && decision.post?.externalPostId);
+      const linkedVideo = youtubeDecision?.post?.externalPostId
+        ? youtubeVideoByExternalId.get(youtubeDecision.post.externalPostId)
+        : undefined;
+      const trend = linkedVideo ? trendByChannelId.get(linkedVideo.channelId) : undefined;
+      const freshnessAt =
+        decisions
+          .flatMap((decision) => decision.post?.snapshots ?? [])
+          .sort((left, right) => right.capturedAt.getTime() - left.capturedAt.getTime())[0]?.capturedAt ?? null;
+
+      return {
+        ...asset,
+        assetIntelligence: asset.intelligence,
+        youtubeContext: linkedVideo
+          ? {
+              externalVideoId: linkedVideo.externalVideoId,
+              genreHint: linkedVideo.genreHint,
+              channelId: linkedVideo.channelId,
+              channelTrend: trend
+                ? {
+                    avgViews30d: trend.avgViews,
+                    medianViews30d: trend.medianViews,
+                    confidence: trend.confidence,
+                    computedAt: trend.computedAt,
+                    publishingWindows: trend.publishingWindows
+                  }
+                : null
+            }
+          : null,
+        freshnessAt
+      };
     });
   }
 

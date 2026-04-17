@@ -66,7 +66,7 @@ export function UploadZone({ session, onUploaded }: Props) {
       // Step 2 — upload parts
       advanceTo(2);
       const totalParts = Math.ceil(file.size / CHUNK_SIZE);
-      const parts: { ETag: string; PartNumber: number }[] = [];
+      const parts: { etag: string; partNumber: number }[] = [];
 
       for (let i = 0; i < totalParts; i++) {
         const partNumber = i + 1;
@@ -86,7 +86,7 @@ export function UploadZone({ session, onUploaded }: Props) {
           throw new Error('Connection error: ETag missing from response. Please check storage CORS settings.');
         }
 
-        parts.push({ ETag: etag.replace(/"/g, ''), PartNumber: partNumber });
+        parts.push({ etag: etag.replace(/"/g, ''), partNumber });
 
         setUploadProgress(Math.round((partNumber / totalParts) * 100));
       }

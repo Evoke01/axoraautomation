@@ -5,6 +5,7 @@ import type { Queue } from "bullmq";
 
 import { env } from "../config/env.js";
 import { NotFoundError, ValidationError } from "../lib/errors.js";
+import { buildJobId, getJobPolicy } from "../queues/job-policy.js";
 import { JobName } from "../queues/names.js";
 import type { CreateAssetInput, OverrideAssetInput } from "../types/domain.js";
 import { AuditService } from "./audit-service.js";
@@ -62,7 +63,10 @@ export class AssetService {
       }
     });
 
-    await this.queue.add(JobName.AssetIngest, { assetId: asset.id });
+    await this.queue.add(JobName.AssetIngest, { assetId: asset.id }, {
+      ...getJobPolicy(JobName.AssetIngest),
+      jobId: buildJobId(JobName.AssetIngest, asset.id)
+    });
 
     await this.audit.log({
       workspaceId: asset.workspaceId,
@@ -107,7 +111,10 @@ export class AssetService {
   }
 
   async queuePlan(assetId: string) {
-    await this.queue.add(JobName.CampaignPlan, { assetId });
+    await this.queue.add(JobName.CampaignPlan, { assetId }, {
+      ...getJobPolicy(JobName.CampaignPlan),
+      jobId: buildJobId(JobName.CampaignPlan, assetId)
+    });
   }
 
   async recordOverride(assetId: string, input: OverrideAssetInput, userId?: string) {

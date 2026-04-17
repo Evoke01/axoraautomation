@@ -55,7 +55,8 @@ const envSchema = z.object({
   DEFAULT_WEEKLY_REPORT_HOUR: z.coerce.number().int().min(0).max(23).default(9),
   YOUTUBE_DAILY_QUOTA_LIMIT: z.coerce.number().int().positive().default(10000),
   YOUTUBE_UPLOAD_RESERVATION_UNITS: z.coerce.number().int().positive().default(150),
-  YOUTUBE_QUOTA_SAFETY_BUFFER: z.coerce.number().int().nonnegative().default(2000)
+  YOUTUBE_QUOTA_SAFETY_BUFFER: z.coerce.number().int().nonnegative().default(2000),
+  YOUTUBE_ALLOW_MOCK: z.coerce.boolean().default(false)
 });
 
 const parsed = envSchema.safeParse(process.env);

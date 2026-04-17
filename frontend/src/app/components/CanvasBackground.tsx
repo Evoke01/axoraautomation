@@ -20,9 +20,9 @@ interface DotState {
 
 export const CanvasBackground: React.FC<CanvasBackgroundProps> = ({
   colors = [[255, 255, 255]],
-  opacities = [0.02, 0.02, 0.03, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.10],
-  dotSize = 2,
-  totalSize = 22,
+  opacities = [0.01, 0.01, 0.02, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08],
+  dotSize = 1.0,
+  totalSize = 18,
   containerClassName,
   showGradient = false,
 }) => {

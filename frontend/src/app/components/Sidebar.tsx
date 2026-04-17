@@ -33,7 +33,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             alt="Axora"
             className="h-7 w-auto object-contain brightness-110"
           />
-          <p className="text-[9px] font-bold text-zinc-600 mt-2 uppercase tracking-[0.4em] pl-1">
+          <p className="text-[9px] font-bold text-zinc-700 mt-2 uppercase tracking-[0.45em] pl-1 font-['Rajdhani']">
             Autonomous engine
           </p>
         </div>
@@ -68,7 +68,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
                 <Icon size={19} strokeWidth={isActive ? 2.5 : 2} />
               </div>
               
-              <span className="relative z-10 text-sm font-semibold tracking-tight tracking-wide flex-1 text-left">
+              <span className={`relative z-10 text-[13px] font-semibold tracking-[0.05em] flex-1 text-left uppercase font-['Rajdhani'] ${isActive ? 'text-white' : 'text-zinc-500 group-hover:text-zinc-300'}`}>
                 {item.label}
               </span>
 

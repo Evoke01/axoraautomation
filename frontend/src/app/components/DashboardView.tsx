@@ -136,8 +136,10 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
           </div>
           <span className="text-xs text-zinc-600">Auto-refresh every 15min</span>
         </div>
-        <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight">Neural Dashboard</h1>
-        <p className="text-zinc-500 text-sm mt-0.5">Real-time content performance and autonomous optimization.</p>
+        <h1 className="font-['Rajdhani'] text-3xl lg:text-4xl font-bold tracking-[-0.03em] leading-none text-transparent bg-clip-text bg-gradient-to-b from-white via-white to-zinc-600">
+          Neural Dashboard
+        </h1>
+        <p className="text-zinc-500 text-xs mt-1 tracking-wide">Real-time content performance and autonomous optimization.</p>
       </motion.div>
 
       {/* ─── Metric cards ─── */}

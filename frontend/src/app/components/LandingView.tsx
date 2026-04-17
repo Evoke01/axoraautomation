@@ -24,9 +24,9 @@ function BreathingCanvas() {
     resize();
     window.addEventListener('resize', resize);
 
-    const CELL = 22;
-    const DOT = 2.8;
-    const OPACITIES = [0.15, 0.15, 0.2, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7, 0.85];
+    const CELL = 18;
+    const DOT = 1.0;
+    const OPACITIES = [0.05, 0.05, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4];
 
     function rand(x: number, y: number) {
       const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
@@ -64,7 +64,7 @@ function BreathingCanvas() {
           if (opacity < 0.01) continue;
           ctx.beginPath();
           ctx.arc(gx * CELL, gy * CELL, DOT / 2, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(160,160,160,${opacity.toFixed(3)})`;
+          ctx.fillStyle = `rgba(180,180,180,${opacity.toFixed(3)})`;
           ctx.fill();
         }
       }
@@ -156,13 +156,13 @@ export function LandingView() {
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 1, ease: 'easeOut' }}
-          className="font-['Rajdhani'] text-5xl md:text-7xl lg:text-[96px] font-bold leading-[1.1] md:leading-[1.0] text-center tracking-tight mb-4"
+          className="font-['Rajdhani'] text-6xl md:text-8xl lg:text-[110px] font-bold leading-[0.85] text-center tracking-[-0.04em] mb-4"
         >
-          <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-500">
+          <span className="text-transparent bg-clip-text bg-gradient-to-b from-white via-white/90 to-zinc-600">
             Content that
           </span>
           <br />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-zinc-400 via-white to-zinc-500 italic pr-4 -mr-4">
+          <span className="text-transparent bg-clip-text bg-gradient-to-b from-white via-white/90 to-zinc-600">
             distributes itself
           </span>
         </motion.h1>

@@ -82,7 +82,7 @@ export class YouTubeHistoryService {
           durationSeconds: video.durationSeconds,
           tags: video.tags,
           genreHint,
-          rawPayload: video.rawPayload
+          rawPayload: video.rawPayload as any
         },
         create: {
           workspaceId: channel.workspaceId,
@@ -94,7 +94,7 @@ export class YouTubeHistoryService {
           durationSeconds: video.durationSeconds,
           tags: video.tags,
           genreHint,
-          rawPayload: video.rawPayload
+          rawPayload: video.rawPayload as any
         }
       });
 
@@ -151,7 +151,7 @@ export class YouTubeHistoryService {
         likeRate: metric.views > 0 ? metric.likes / metric.views : 0,
         commentRate: metric.views > 0 ? metric.comments / metric.views : 0,
         velocityPerHour,
-        rawMetrics: metric.rawMetrics
+        rawMetrics: metric.rawMetrics as any
       }
     });
 

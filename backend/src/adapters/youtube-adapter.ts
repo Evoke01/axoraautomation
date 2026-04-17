@@ -436,7 +436,7 @@ export class YouTubeAdapter {
           title: video.snippet?.title ?? "Untitled",
           description: video.snippet?.description ?? "",
           publishedAt: video.snippet?.publishedAt ? new Date(video.snippet.publishedAt) : new Date(),
-          durationSeconds: parseIsoDurationToSeconds(video.contentDetails?.duration),
+          durationSeconds: parseIsoDurationToSeconds(video.contentDetails?.duration ?? undefined),
           tags: video.snippet?.tags ?? [],
           rawPayload
         };

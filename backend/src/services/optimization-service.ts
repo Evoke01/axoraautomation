@@ -193,8 +193,8 @@ export class OptimizationService {
         periodEnd: end,
         status: "generated",
         report: {
-          opportunities,
-          competitors,
+          opportunities: opportunities as any,
+          competitors: competitors as any,
           meta: {
             source: "youtube-history-v2",
             generatedAt: new Date().toISOString(),

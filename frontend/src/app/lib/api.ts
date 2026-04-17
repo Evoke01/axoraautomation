@@ -105,6 +105,16 @@ export interface ApiSession {
   entitlements: { plan: string; autoPublishEnabled: boolean } | null;
 }
 
+export interface ApiSummary {
+  assets: number;
+  publishedPosts: number;
+  pendingReview: number;
+  latestOpportunityReportAt: string | null;
+  performanceHistory: Array<{ day: string; views: number; engagement: number }>;
+  platformMix: Array<{ name: string; value: number; color: string }>;
+  systemHealth: Array<{ label: string; used: string; total: string; pct: number; color: string }>;
+}
+
 export const api = {
   auth: {
     resolveSession: () => request<ApiSession>("/auth/session/resolve", { method: "POST" }),
@@ -134,10 +144,7 @@ export const api = {
   },
 
   dashboard: {
-    getSummary: () =>
-      request<{ assets: number; publishedPosts: number; pendingReview: number; latestOpportunityReportAt: string | null }>(
-        "/dashboard/summary"
-      ),
+    getSummary: () => request<ApiSummary>("/dashboard/summary"),
   },
 
   posts: {

@@ -5,7 +5,7 @@ import {
   PieChart, Pie, Cell
 } from 'recharts';
 import { UploadZone } from './UploadZone';
-import { api, type ApiSession, type ApiPost, type ApiAsset } from '../lib/api';
+import { api, type ApiSession, type ApiPost, type ApiAsset, type ApiSummary } from '../lib/api';
 import {
   Eye, TrendingUp, Activity, Clock, Zap, Radio,
   ArrowUpRight, ArrowDownRight, ChevronRight,
@@ -69,30 +69,6 @@ function Counter({ to, duration = 1200 }: { to: number; duration?: number }) {
   return <>{val.toLocaleString()}</>;
 }
 
-/* ─── Data helpers ───────────────────────────────────────── */
-const PERF_DATA = [
-  { day: 'Mon', views: 1200, engagement: 48 },
-  { day: 'Tue', views: 1900, engagement: 62 },
-  { day: 'Wed', views: 1400, engagement: 55 },
-  { day: 'Thu', views: 2800, engagement: 78 },
-  { day: 'Fri', views: 2200, engagement: 71 },
-  { day: 'Sat', views: 3100, engagement: 85 },
-  { day: 'Sun', views: 2700, engagement: 80 },
-];
-
-const PLATFORM_DATA = [
-  { name: 'YouTube', value: 58, color: '#ef4444' },
-  { name: 'Instagram', value: 24, color: '#ec4899' },
-  { name: 'TikTok', value: 18, color: '#06b6d4' },
-];
-
-const ASSET_SPARKS: Record<string, number[]> = {
-  assets: [2, 2, 3, 3, 4, 4, 4],
-  posts: [0, 0, 0, 1, 1, 1, 1],
-  review: [1, 2, 1, 0, 0, 0, 0],
-  views: [400, 820, 1100, 900, 1400, 1800, 2100],
-};
-
 const STATUS_STEPS = ['Upload', 'Validate', 'Analyze', 'Generate', 'Plan', 'Review', 'Publish'];
 
 /* ─── Main component ─────────────────────────────────────── */
@@ -102,7 +78,7 @@ interface DashboardViewProps {
 }
 
 export function DashboardView({ session, onUploaded }: DashboardViewProps) {
-  const [summary, setSummary] = useState<{ assets: number; publishedPosts: number; pendingReview: number; latestOpportunityReportAt: string | null } | null>(null);
+  const [summary, setSummary] = useState<ApiSummary | null>(null);
   const [posts, setPosts] = useState<ApiPost[]>([]);
   const [assets, setAssets] = useState<ApiAsset[]>([]);
   const [tick, setTick] = useState(0);
@@ -117,26 +93,34 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
 
   const totalViews = posts.reduce((s, p) => s + (p.metrics?.views ?? 0), 0);
   const totalLikes = posts.reduce((s, p) => s + (p.metrics?.likes ?? 0), 0);
-  const engRate = totalViews > 0 ? ((totalLikes / totalViews) * 100).toFixed(1) : '0.0';
   const recentPosts = posts.slice(0, 4);
+
+  // Derived datasets
+  const perfHistory = summary?.performanceHistory ?? [];
+  const platformMix = summary?.platformMix ?? [];
+  const systemHealth = summary?.systemHealth ?? [];
+
+  const sparkViews = perfHistory.map(h => h.views);
+  const sparkEng = perfHistory.map(h => h.engagement);
+  const sparkAssets = perfHistory.map((_, i) => (summary?.assets ?? 0) - (perfHistory.length - 1 - i));
 
   /* ─── Metric card data ─── */
   const metrics = [
     {
       label: 'Total assets', value: summary?.assets ?? 0, sub: 'Uploaded',
-      trend: +12, color: '#10b981', Icon: Eye, sparks: ASSET_SPARKS.assets,
+      trend: +12, color: '#10b981', Icon: Eye, sparks: sparkAssets,
     },
     {
       label: 'Published posts', value: summary?.publishedPosts ?? 0, sub: 'Across platforms',
-      trend: +8, color: '#06b6d4', Icon: TrendingUp, sparks: ASSET_SPARKS.posts,
+      trend: +8, color: '#06b6d4', Icon: TrendingUp, sparks: sparkEng,
     },
     {
       label: 'Total views', value: totalViews, sub: 'All time',
-      trend: +34, color: '#8b5cf6', Icon: Activity, sparks: ASSET_SPARKS.views,
+      trend: +34, color: '#8b5cf6', Icon: Activity, sparks: sparkViews,
     },
     {
       label: 'Pending review', value: summary?.pendingReview ?? 0, sub: summary?.pendingReview ? 'Action needed' : 'All clear',
-      trend: -(summary?.pendingReview ?? 0), color: summary?.pendingReview ? '#f59e0b' : '#10b981', Icon: Clock, sparks: ASSET_SPARKS.review,
+      trend: -(summary?.pendingReview ?? 0), color: summary?.pendingReview ? '#f59e0b' : '#10b981', Icon: Clock, sparks: sparkEng.slice().reverse(),
     },
   ];
 
@@ -230,7 +214,7 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
           </div>
           <div style={{ height: 180 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={PERF_DATA} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+              <AreaChart data={perfHistory} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gViews" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
@@ -268,9 +252,9 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
           <div className="flex items-center justify-center" style={{ height: 130 }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={PLATFORM_DATA} cx="50%" cy="50%" innerRadius={38} outerRadius={58}
+                <Pie data={platformMix} cx="50%" cy="50%" innerRadius={38} outerRadius={58}
                   dataKey="value" paddingAngle={3} startAngle={90} endAngle={-270}>
-                  {PLATFORM_DATA.map((p, i) => (
+                  {platformMix.map((p, i) => (
                     <Cell key={i} fill={p.color} opacity={0.9} />
                   ))}
                 </Pie>
@@ -282,7 +266,7 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
             </ResponsiveContainer>
           </div>
           <div className="space-y-2 mt-3">
-            {PLATFORM_DATA.map((p) => (
+            {platformMix.map((p) => (
               <div key={p.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
@@ -460,11 +444,7 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
           <div className="text-xs text-zinc-500 mb-5">Platform quotas & status</div>
 
           <div className="space-y-5">
-            {[
-              { label: 'YouTube Quota', pct: 28, color: '#ef4444', used: '2,800', total: '10,000' },
-              { label: 'Storage Used', pct: 72, color: '#8b5cf6', used: '7.2 GB', total: '10 GB' },
-              { label: 'AI Credits', pct: 45, color: '#06b6d4', used: '450', total: '1,000' },
-            ].map(({ label, pct, color, used, total }) => (
+            {systemHealth.map(({ label, pct, color, used, total }) => (
               <div key={label} className="flex items-center gap-4">
                 <div className="relative flex-shrink-0">
                   <RingGauge pct={pct} color={color} size={48} stroke={4} />

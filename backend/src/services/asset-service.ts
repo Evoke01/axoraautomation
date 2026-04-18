@@ -63,10 +63,16 @@ export class AssetService {
       }
     });
 
-    await this.queue.add(JobName.AssetIngest, { assetId: asset.id }, {
-      ...getJobPolicy(JobName.AssetIngest),
-      jobId: buildJobId(JobName.AssetIngest, asset.id)
-    });
+    try {
+      await this.queue.add(JobName.AssetIngest, { assetId: asset.id }, {
+        ...getJobPolicy(JobName.AssetIngest),
+        jobId: buildJobId(JobName.AssetIngest, asset.id)
+      });
+    } catch (err) {
+      console.error(`[AssetService] Failed to queue ingest for asset ${asset.id}:`, err);
+      // We don't throw here to ensure the user gets a success response for the DB record creation.
+      // The status VALIDATING will allow retry/manual trigger later.
+    }
 
     await this.audit.log({
       workspaceId: asset.workspaceId,

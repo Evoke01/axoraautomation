@@ -119,11 +119,11 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   await registerRecurringJobs(app.services);
   const worker = createWorker(app.services);
 
-  app.setErrorHandler((error, request, reply) => {
+  app.setErrorHandler((error: any, request, reply) => {
     request.log.error({
       err: error,
-      msg: error.message,
-      stack: error.stack,
+      msg: error?.message,
+      stack: error?.stack,
       url: request.url,
       method: request.method
     }, "Unhandled exception occurred");
@@ -139,7 +139,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     return reply.status(500).send({
       error: "internal_error",
       message: "Internal server error.",
-      ...(env.NODE_ENV === "development" ? { details: error.message, stack: error.stack } : {})
+      ...(env.NODE_ENV === "development" ? { details: error?.message, stack: error?.stack } : {})
     });
   });
 

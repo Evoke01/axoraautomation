@@ -13,29 +13,35 @@ import { api, type ApiSession } from './lib/api';
 
 export default function App() {
   const initialView = new URLSearchParams(window.location.search).get('view') ?? 'dashboard';
-  const isPreview = new URLSearchParams(window.location.search).get('preview') === 'landing';
+  const isWaitlistPreview = new URLSearchParams(window.location.search).get('preview') === 'landing';
   const [activeView, setActiveView] = useState(initialView);
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [dashboardKey, setDashboardKey] = useState(0);
 
   useEffect(() => {
-    api.auth.resolveSession()
-      .then(setSession)
-      .catch(() => setSession(null))
-      .finally(() => setLoading(false));
+    // Artificial delay to show loading screen
+    const timer = setTimeout(() => {
+      api.auth.resolveSession()
+        .then(setSession)
+        .catch(() => setSession(null))
+        .finally(() => setLoading(false));
+    }, 2500);
+
+    return () => clearTimeout(timer);
   }, []);
 
   function handleUploaded() {
     setDashboardKey(k => k + 1);
   }
 
-  if (loading) {
-    return <LoadingScreen />;
+  // Show waitlist ONLY on specific preview URL
+  if (isWaitlistPreview) {
+    return <LandingView />;
   }
 
-  if (!session || isPreview) {
-    return <LandingView />;
+  if (loading) {
+    return <LoadingScreen />;
   }
 
   return (

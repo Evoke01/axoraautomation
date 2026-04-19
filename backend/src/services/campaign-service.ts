@@ -14,6 +14,7 @@ import { NotFoundError, ValidationError } from "../lib/errors.js";
 import { buildJobId, getJobPolicy } from "../queues/job-policy.js";
 import { JobName } from "../queues/names.js";
 import { AuditService } from "./audit-service.js";
+import { MultiAgentService } from "./multi-agent-service.js";
 
 function pickPublishTime(timezone: string) {
   const zonedNow = toZonedTime(new Date(), timezone);
@@ -31,7 +32,8 @@ export class CampaignService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly queue: Queue,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly agents: MultiAgentService
   ) {}
 
   async planAsset(assetId: string) {
@@ -73,7 +75,24 @@ export class CampaignService {
 
     const format =
       (asset.files[0]?.durationSeconds ?? 0) <= 60 ? ContentFormat.YOUTUBE_SHORT : ContentFormat.YOUTUBE_VIDEO;
-    const scheduledFor = pickPublishTime(asset.workspace.timezone);
+    const scheduleRecommendation = await this.agents
+      .recommendSchedule({
+        workspaceId: asset.workspaceId,
+        timezone: asset.workspace.timezone,
+        creatorName: asset.creator.name,
+        creatorNiche: asset.creator.niche,
+        assetTitle: asset.title,
+        assetIntelligence:
+          asset.intelligence && typeof asset.intelligence === "object"
+            ? (asset.intelligence as Record<string, unknown>)
+            : null
+      })
+      .catch(() => null);
+    const scheduledFor = scheduleRecommendation?.scheduledFor ?? pickPublishTime(asset.workspace.timezone);
+    const scheduleRationale =
+      scheduleRecommendation?.rationale ?? "Initial distribution run based on default creator timing.";
+    const schedulingProvider = scheduleRecommendation?.provider ?? "heuristic";
+    const schedulingConfidence = scheduleRecommendation?.confidence ?? 0.75;
 
     const campaign = await this.prisma.campaign.create({
       data: {
@@ -82,14 +101,16 @@ export class CampaignService {
         status: "ACTIVE",
         summary: {
           platform: Platform.YOUTUBE,
-          format
+          format,
+          schedulingProvider,
+          schedulingConfidence
         },
         waves: {
           create: {
             waveNumber: 1,
             status: "PENDING",
             scheduledFor,
-            rationale: "Initial distribution run based on default creator timing.",
+            rationale: scheduleRationale,
             decisions: {
               create: {
                 connectedAccountId: account?.id,
@@ -99,11 +120,14 @@ export class CampaignService {
                 status: DecisionStatus.SCHEDULED,
                 scheduledFor,
                 publishAt: scheduledFor,
-                score: 0.75,
+                score: schedulingConfidence,
                 predictedViews: 500,
                 predictedEngagement: 0.06,
                 rationale: {
-                  baselineWindow: "evening",
+                  scheduleRationale,
+                  schedulingConfidence,
+                  schedulingProvider,
+                  baselineWindow: schedulingProvider === "heuristic" ? "evening" : null,
                   platform: Platform.YOUTUBE,
                   category: asset.creator.niche ?? "general"
                 },
@@ -146,7 +170,9 @@ export class CampaignService {
       targetId: campaign.id,
       payload: {
         scheduledFor: scheduledFor.toISOString(),
-        accountId: account?.id ?? null
+        accountId: account?.id ?? null,
+        schedulingProvider,
+        schedulingConfidence
       }
     });
 

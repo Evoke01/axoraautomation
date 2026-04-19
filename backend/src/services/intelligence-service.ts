@@ -1,24 +1,34 @@
-import { Platform, type PrismaClient } from "@prisma/client";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GoogleAIFileManager, FileState } from "@google/generative-ai/server";
+import type { PrismaClient } from "@prisma/client";
 import { writeFile, rm, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { env } from "../config/env.js";
-import type { StorageService } from "../lib/storage.js";
 import { NotFoundError } from "../lib/errors.js";
+import type { StorageService } from "../lib/storage.js";
+import { MultiAgentService } from "./multi-agent-service.js";
+
+type IntelligenceResult = {
+  hook: string;
+  mainPoint: string;
+  vibe: string;
+  keywords: string[];
+  summary: string;
+};
 
 export class IntelligenceService {
-  private readonly genAI: GoogleGenerativeAI;
-  private readonly fileManager: GoogleAIFileManager;
+  private readonly genAI: GoogleGenerativeAI | null;
+  private readonly fileManager: GoogleAIFileManager | null;
 
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly storage: StorageService
+    private readonly storage: StorageService,
+    private readonly agents: MultiAgentService
   ) {
-    this.genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY || "");
-    this.fileManager = new GoogleAIFileManager(env.GEMINI_API_KEY || "");
+    this.genAI = env.GEMINI_API_KEY ? new GoogleGenerativeAI(env.GEMINI_API_KEY) : null;
+    this.fileManager = env.GEMINI_API_KEY ? new GoogleAIFileManager(env.GEMINI_API_KEY) : null;
   }
 
   async analyzeVideo(assetId: string) {
@@ -32,81 +42,206 @@ export class IntelligenceService {
     }
 
     const file = asset.files[0];
-    if (!file) throw new NotFoundError("File not found.");
+    if (!file) {
+      throw new NotFoundError("File not found.");
+    }
 
-    // 1. Download video to a temporary file
+    let analysis = this.buildHeuristicAnalysis({
+      title: asset.title,
+      rawNotes: asset.rawNotes,
+      creatorNiche: asset.creator.niche,
+      creatorName: asset.creator.name
+    });
+    let baseProvider: "gemini" | "heuristic" = "heuristic";
+
+    if (this.genAI && this.fileManager) {
+      try {
+        analysis = await this.runGeminiAnalysis({
+          fileName: file.fileName,
+          mimeType: file.sniffedMimeType || "video/mp4",
+          storageKey: file.storageKey,
+          creatorName: asset.creator.name,
+          creatorNiche: asset.creator.niche,
+          fallback: analysis
+        });
+        baseProvider = "gemini";
+      } catch (error) {
+        console.error("Video intelligence analysis fell back to heuristic mode:", error);
+      }
+    }
+
+    const enriched = await this.agents.enrichIntelligence(
+      {
+        title: asset.title,
+        rawNotes: asset.rawNotes,
+        creatorNiche: asset.creator.niche,
+        baseProvider
+      },
+      analysis
+    );
+
+    await this.prisma.asset.update({
+      where: { id: assetId },
+      data: {
+        intelligence: enriched
+      }
+    });
+
+    return enriched;
+  }
+
+  private async runGeminiAnalysis(input: {
+    fileName: string;
+    mimeType: string;
+    storageKey: string;
+    creatorName: string;
+    creatorNiche: string | null;
+    fallback: IntelligenceResult;
+  }): Promise<IntelligenceResult> {
     const tempDir = await mkdtemp(join(tmpdir(), "axora-analysis-"));
-    const tempFilePath = join(tempDir, file.fileName);
-    
+    const tempFilePath = join(tempDir, input.fileName);
+    let uploadedFileName: string | null = null;
+
     try {
-      const buffer = await this.storage.getObjectBuffer(file.storageKey);
+      const buffer = await this.storage.getObjectBuffer(input.storageKey);
       await writeFile(tempFilePath, buffer);
 
-      // 2. Upload to Gemini File API
-      const uploadResponse = await this.fileManager.uploadFile(tempFilePath, {
-        mimeType: file.sniffedMimeType || "video/mp4",
-        displayName: file.fileName,
+      const uploadResponse = await this.fileManager!.uploadFile(tempFilePath, {
+        mimeType: input.mimeType,
+        displayName: input.fileName
       });
 
-      const fileName = uploadResponse.file.name;
+      uploadedFileName = uploadResponse.file.name;
+      let geminiFile = await this.fileManager!.getFile(uploadedFileName);
 
-      // 3. Wait for processing (Gemini requires the file to be ACTIVE)
-      let geminiFile = await this.fileManager.getFile(fileName);
       while (geminiFile.state === FileState.PROCESSING) {
-        process.stdout.write(".");
         await new Promise((resolve) => setTimeout(resolve, 2000));
-        geminiFile = await this.fileManager.getFile(fileName);
+        geminiFile = await this.fileManager!.getFile(uploadedFileName);
       }
 
       if (geminiFile.state !== FileState.ACTIVE) {
-        throw new Error(`File processing failed: ${geminiFile.state}`);
+        throw new Error(`Gemini file processing failed: ${geminiFile.state}`);
       }
 
-      // 4. Run Analysis
-      const model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = this.genAI!.getGenerativeModel({ model: env.GEMINI_MODEL });
       const prompt = `
-        Watch this video and provide a high-level analysis for a YouTube creator.
-        
-        Creator: ${asset.creator.name}
-        Niche: ${asset.creator.niche ?? "General"}
-        
-        Focus on:
-        1. THE HOOK: What happens in the first 5 seconds?
-        2. THE VALUE: What is the main point of this video?
-        3. THE VIBE: What is the energy level? (High, chill, educational, provactive?)
-        4. KEYWORDS: What are 5-8 specific topics seen or heard in the video?
-        
-        Return ONLY a JSON object with keys: hook, mainPoint, vibe, keywords, summary.
-      `;
+Watch this video and provide a high-level creator analysis.
+
+Creator: ${input.creatorName}
+Niche: ${input.creatorNiche ?? "General"}
+
+Return only JSON with keys:
+- hook
+- mainPoint
+- vibe
+- keywords
+- summary
+
+Focus on the first seconds, the central promise, the dominant energy, and the specific topics that appear on screen or in speech.
+`;
 
       const result = await model.generateContent([
         {
           fileData: {
             mimeType: geminiFile.mimeType,
-            fileUri: geminiFile.uri,
-          },
+            fileUri: geminiFile.uri
+          }
         },
-        { text: prompt },
+        { text: prompt }
       ]);
 
       const responseText = result.response.text();
-      const cleanedJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-      const analysisJson = JSON.parse(cleanedJson);
+      const parsed = safeJsonParse(responseText);
 
-      // 5. Save results to Database
-      await this.prisma.asset.update({
-        where: { id: assetId },
-        data: {
-          intelligence: analysisJson
-        }
-      });
-
-      // 6. Cleanup Gemini file
-      await this.fileManager.deleteFile(fileName);
-
-      return analysisJson;
+      return {
+        hook: asString(parsed?.hook, input.fallback.hook),
+        mainPoint: asString(parsed?.mainPoint, input.fallback.mainPoint),
+        vibe: asString(parsed?.vibe, input.fallback.vibe),
+        keywords: normalizeKeywords(parsed?.keywords, input.fallback.keywords),
+        summary: asString(parsed?.summary, input.fallback.summary)
+      };
     } finally {
+      if (uploadedFileName) {
+        await this.fileManager?.deleteFile(uploadedFileName).catch(() => undefined);
+      }
       await rm(tempDir, { recursive: true, force: true });
     }
   }
+
+  private buildHeuristicAnalysis(input: {
+    title: string;
+    rawNotes: string | null;
+    creatorNiche: string | null;
+    creatorName: string;
+  }): IntelligenceResult {
+    const keywords = extractKeywords([
+      input.title,
+      input.rawNotes ?? "",
+      input.creatorNiche ?? "",
+      input.creatorName
+    ]);
+
+    return {
+      hook: input.title,
+      mainPoint: input.rawNotes ?? `A ${input.creatorNiche ?? "general"} video from ${input.creatorName}.`,
+      vibe: inferVibe(input.rawNotes ?? input.title),
+      keywords,
+      summary: [input.title, input.rawNotes ?? "", input.creatorNiche ?? ""]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+    };
+  }
+}
+
+function safeJsonParse(value: string) {
+  const cleaned = value.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function asString(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function normalizeKeywords(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const cleaned = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function extractKeywords(source: string[]) {
+  const text = source.join(" ").toLowerCase();
+  const tokens = text
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 3)
+    .slice(0, 8);
+
+  return [...new Set(tokens)];
+}
+
+function inferVibe(text: string) {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("breakdown") || normalized.includes("tutorial") || normalized.includes("how to")) {
+    return "educational";
+  }
+  if (normalized.includes("story") || normalized.includes("behind the scenes")) {
+    return "storytelling";
+  }
+  if (normalized.includes("hot take") || normalized.includes("controvers")) {
+    return "provocative";
+  }
+  return "high-energy";
 }

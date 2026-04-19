@@ -21,7 +21,8 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().min(1),
   S3_PUBLIC_BASE_URL: z.string().url().optional().or(z.literal("")),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(false),
-  GEMINI_API_KEY: z.string().min(1),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().url().optional(),
@@ -46,6 +47,21 @@ const envSchema = z.object({
     .string()
     .url()
     .default("https://open.tiktokapis.com/v2/oauth/token/"),
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
+  GROQ_MODEL: z.string().default("llama-3.3-70b-versatile"),
+  MISTRAL_API_KEY: z.string().optional(),
+  MISTRAL_API_URL: z.string().url().default("https://api.mistral.ai/v1/chat/completions"),
+  MISTRAL_MODEL: z.string().default("mistral-small-latest"),
+  COHERE_API_KEY: z.string().optional(),
+  COHERE_API_URL: z.string().url().default("https://api.cohere.com/v2/chat"),
+  COHERE_MODEL: z.string().default("command-r-08-2024"),
+  HF_API_TOKEN: z.string().optional(),
+  HF_ZERO_SHOT_MODEL: z.string().default("facebook/bart-large-mnli"),
+  HF_INFERENCE_BASE_URL: z
+    .string()
+    .url()
+    .default("https://router.huggingface.co/hf-inference/models"),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().url().optional(),
   OPENAI_MODEL: z.string().default("deepseek-chat"),

@@ -26,6 +26,7 @@ import { CampaignService } from "./services/campaign-service.js";
 import { ConnectionService } from "./services/connection-service.js";
 import { DashboardService } from "./services/dashboard-service.js";
 import { MetadataService } from "./services/metadata-service.js";
+import { MultiAgentService } from "./services/multi-agent-service.js";
 import { OptimizationService } from "./services/optimization-service.js";
 import { StoragePurgeService } from "./services/storage-purge-service.js";
 import { QuotaService } from "./services/quota-service.js";
@@ -43,6 +44,7 @@ export type AppServices = {
   uploads: UploadService;
   assets: AssetService;
   validation: AssetValidationService;
+  agents: MultiAgentService;
   intelligence: IntelligenceService;
   metadata: MetadataService;
   quota: QuotaService;
@@ -74,11 +76,12 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const uploads = new UploadService(prisma, storage);
   const assets = new AssetService(prisma, queue, audit);
   const validation = new AssetValidationService(prisma, storage, audit);
-  const intelligence = new IntelligenceService(prisma, storage);
-  const metadata = new MetadataService(prisma);
+  const agents = new MultiAgentService(prisma);
+  const intelligence = new IntelligenceService(prisma, storage, agents);
+  const metadata = new MetadataService(prisma, agents);
   const quota = new QuotaService(prisma);
   const purge = new StoragePurgeService(prisma, storage);
-  const campaigns = new CampaignService(prisma, queue, audit);
+  const campaigns = new CampaignService(prisma, queue, audit, agents);
   const optimization = new OptimizationService(prisma);
   const dashboard = new DashboardService(prisma);
   const connections = new ConnectionService(prisma, audit);
@@ -98,6 +101,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     uploads,
     assets,
     validation,
+    agents,
     intelligence,
     metadata,
     quota,

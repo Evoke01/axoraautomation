@@ -38,7 +38,8 @@ describe("CampaignService", () => {
 
     const queue = { add: vi.fn() } as any;
     const audit = { log: vi.fn() } as any;
-    const service = new CampaignService(prisma, queue, audit);
+    const agents = { recommendSchedule: vi.fn() } as any;
+    const service = new CampaignService(prisma, queue, audit, agents);
 
     const result = await service.evaluateReviewGate("asset_1");
 
@@ -79,7 +80,8 @@ describe("CampaignService", () => {
 
     const queue = { add: vi.fn().mockResolvedValue(undefined) } as any;
     const audit = { log: vi.fn() } as any;
-    const service = new CampaignService(prisma, queue, audit);
+    const agents = { recommendSchedule: vi.fn() } as any;
+    const service = new CampaignService(prisma, queue, audit, agents);
 
     const result = await service.evaluateReviewGate("asset_1");
 

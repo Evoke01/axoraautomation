@@ -11,6 +11,8 @@ Axora is an autonomous content distribution backend for creator video assets. Th
 - Prisma + PostgreSQL
 - BullMQ + Redis
 - S3-compatible object storage for raw assets
+- Gemini for video analysis when enabled
+- Groq for metadata generation, Mistral for metadata scoring, Cohere for timing decisions, Hugging Face for niche and engagement classification
 - YouTube OAuth + publishing adapter
 - Instagram OAuth setup scaffolding
 - TikTok OAuth setup scaffolding
@@ -37,6 +39,14 @@ Set these env vars before using the Settings screen to connect accounts:
 - `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`
 - `FRONTEND_APP_URL`
 
+Optional AI provider vars for the multi-agent content pipeline:
+
+- `GEMINI_API_KEY`, `GEMINI_MODEL`
+- `GROQ_API_KEY`, `GROQ_MODEL`
+- `MISTRAL_API_KEY`, `MISTRAL_MODEL`
+- `COHERE_API_KEY`, `COHERE_MODEL`
+- `HF_API_TOKEN`, `HF_ZERO_SHOT_MODEL`
+
 Optional endpoint override vars are also supported for Instagram and TikTok.
 
 Current platform scope:
@@ -61,12 +71,23 @@ Current platform scope:
 
 - Direct multipart asset upload initialization and completion
 - Hard asset validation with MIME sniffing and `ffprobe`
-- Metadata generation and campaign planning
+- Multi-agent asset analysis and metadata generation
+- AI-assisted schedule selection with heuristic fallback
 - Tier-based review gating
 - YouTube publishing with token refresh and quota reservation
 - Metrics snapshot polling and optimization recompute
 - Weekly opportunity report generation
 - Audit retention cleanup
+
+## Multi-agent split
+
+- `Gemini Flash`: analyzes video content, hook, vibe, and primary topics when a Gemini key is configured
+- `Hugging Face Inference`: classifies niche and likely engagement band
+- `Groq / Llama 3.3 70B`: writes metadata variants
+- `Mistral small`: scores generated variants and pushes the best one to the front
+- `Cohere Command-R`: recommends the publish slot from creator history and current asset context
+
+If any provider key is missing, Axora falls back to heuristics instead of failing the asset pipeline.
 
 ## Verification
 

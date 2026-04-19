@@ -118,7 +118,13 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     tiktok
   });
 
-  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cors, {
+    origin: env.FRONTEND_APP_URL || true,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    exposedHeaders: ["X-Total-Count"]
+  });
   await app.register(sensible);
   await registerApiRoutes(app);
 

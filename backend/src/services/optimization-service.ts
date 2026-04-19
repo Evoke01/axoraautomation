@@ -6,26 +6,21 @@ export class OptimizationService {
   constructor(private readonly prisma: PrismaClient) {}
 
   async recompute(workspaceId: string) {
-    const snapshots = await this.prisma.postMetricsSnapshot.findMany({
+    const posts = await this.prisma.platformPost.findMany({
       where: {
-        platformPost: {
-          workspaceId
-        }
-      },
-      include: {
-        platformPost: {
-          include: {
-            decision: true
-          }
-        }
+        workspaceId,
+        status: PostStatus.PUBLISHED
       },
       orderBy: {
-        capturedAt: "desc"
+        lastPolledAt: "desc"
       },
       take: 100
     });
 
-    const views = snapshots.map((snapshot) => snapshot.views ?? 0);
+    const views = posts.map((post) => {
+      const metrics = post.metrics as Record<string, unknown> | null;
+      return typeof metrics?.views === "number" ? metrics.views : 0;
+    });
     const averageViews = views.length > 0 ? views.reduce((sum, value) => sum + value, 0) / views.length : 0;
 
     return this.prisma.optimizationSnapshot.create({
@@ -46,7 +41,7 @@ export class OptimizationService {
           dataPoint: 0.95
         },
         decisionSummary: {
-          sampleSize: snapshots.length,
+          sampleSize: posts.length,
           averageViews
         }
       }

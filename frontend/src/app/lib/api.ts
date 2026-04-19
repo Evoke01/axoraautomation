@@ -24,6 +24,7 @@ export interface ApiConnection {
     status: string;
     externalAccountId: string | null;
     tokenExpiresAt: string | null;
+    metadata?: Record<string, unknown> | null;
   }>;
 }
 
@@ -33,6 +34,9 @@ export interface ApiPost {
   status: string;
   publishedAt: string | null;
   externalUrl: string | null;
+  lastPolledAt: string | null;
+  nextPollAt: string | null;
+  metricsFreshnessMinutes: number | null;
   metrics: { views?: number; likes?: number; comments?: number } | null;
   asset: { id: string; title: string; status: string };
   decision: {
@@ -53,6 +57,8 @@ export interface ApiAsset {
   status: string;
   createdAt: string;
   rawNotes: string | null;
+  totalViews?: number;
+  metricsFreshnessMinutes?: number | null;
   tags: { label: string; kind: string }[];
   campaigns: Array<{
     id: string;
@@ -73,6 +79,9 @@ export interface ApiAsset {
           publishedAt: string | null;
           externalUrl: string | null;
           externalPostId?: string | null;
+          lastPolledAt?: string | null;
+          nextPollAt?: string | null;
+          metrics?: { views?: number; likes?: number; comments?: number } | null;
           snapshots: Array<{ views: number | null; likes: number | null; comments: number | null; capturedAt?: string }>;
         } | null;
       }>;
@@ -110,9 +119,107 @@ export interface ApiSummary {
   publishedPosts: number;
   pendingReview: number;
   latestOpportunityReportAt: string | null;
-  performanceHistory: Array<{ day: string; views: number; engagement: number }>;
+  channelTotals: {
+    totalVideos: number;
+    totalViews: number;
+    subscriberCount: number | null;
+    channelViewsRecentWindow: number | null;
+  };
+  axoraTotals: {
+    axoraPublishedPosts: number;
+    axoraManagedViews: number;
+    axoraManagedLikes: number;
+    axoraManagedComments: number;
+  };
+  performanceHistory: Array<{
+    day: string;
+    date: string;
+    views: number;
+    likes: number;
+    comments: number;
+    engagement: number;
+    watchTimeMinutes: number;
+  }>;
   platformMix: Array<{ name: string; value: number; color: string }>;
   systemHealth: Array<{ label: string; used: string; total: string; pct: number; color: string }>;
+  freshness: {
+    channelAnalyticsMinutes: number | null;
+    axoraMetricsMinutes: number | null;
+    competitorMinutes: number | null;
+  };
+  partialFlags: {
+    youtubeReconnectRequired: boolean;
+    channelAnalyticsAvailable: boolean;
+    competitorWarmup: boolean;
+    metricsSyncing: boolean;
+  };
+}
+
+export interface ApiIntelligenceOverview {
+  channel: {
+    connected: boolean;
+    reconnectRequired: boolean;
+    analyticsEnabled: boolean;
+    freshnessMinutes: number | null;
+    totals: {
+      totalViews: number;
+      totalSubscribers: number | null;
+      totalVideos: number;
+      recentViews: number | null;
+    } | null;
+    bestPublishingWindows: Record<string, number> | null;
+    topMovers: Array<{
+      id: string;
+      assetId: string;
+      title: string;
+      views: number;
+      likes: number;
+      comments: number;
+      publishedAt: string | null;
+      freshnessMinutes: number | null;
+    }>;
+    formatSplit: Array<{ label: string; count: number }>;
+    underperformers: Array<{
+      id: string;
+      assetId: string;
+      title: string;
+      views: number;
+      baselineViews: number;
+      recommendedAction: string;
+      publishedAt: string | null;
+    }>;
+  };
+  competitors: {
+    freshnessMinutes: number | null;
+    warmup: boolean;
+    channels: Array<{
+      id: string;
+      name: string;
+      subscriberCount: number | null;
+      totalVideos: number | null;
+      avgViews: number;
+      postingWindow: string;
+      topicKeywords: string[];
+      trend: string;
+      freshnessMinutes: number | null;
+    }>;
+    opportunities: Array<{
+      type: string;
+      title: string;
+      description: string;
+      action: string;
+      confidence: number;
+      sourceFreshnessMinutes: number | null;
+    }>;
+  };
+  weeklyBrief: {
+    generatedAt: string;
+    status: string;
+  } | null;
+  partialFlags: {
+    youtubeReconnectRequired: boolean;
+    competitorWarmup: boolean;
+  };
 }
 
 export const api = {
@@ -167,7 +274,9 @@ export const api = {
   },
 
   intelligence: {
+    overview: () => request<ApiIntelligenceOverview>("/intelligence/overview"),
     weekly: () => request<{ report: { opportunities: any[]; competitors: any[] }; generatedAt: string } | null>("/intelligence/weekly"),
+    refresh: () => request<{ queued: boolean }>("/intelligence/refresh", { method: "POST" }),
     generate: () => request<{ success: boolean }>("/intelligence/generate", { method: "POST" }),
   }
 };

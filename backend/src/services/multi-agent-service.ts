@@ -1,8 +1,9 @@
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { PrismaClient } from "@prisma/client";
-import OpenAI from "openai";
+import { z } from "zod";
 
 import { env } from "../config/env.js";
+import type { AIOrchestrator } from "../ai/orchestrator.js";
 
 type BaseIntelligence = {
   hook: string;
@@ -67,9 +68,10 @@ type ClassificationResult = {
 };
 
 export class MultiAgentService {
-  private groqClient: OpenAI | null = null;
-
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly orchestrator: AIOrchestrator
+  ) {}
 
   async enrichIntelligence(
     context: {
@@ -149,11 +151,11 @@ export class MultiAgentService {
     }
 
     const optimized = await this.optimizeVariants(context, variants);
-    const providerSuffix = optimized.usedOptimizer ? "+mistral" : "";
+    const optimizerSuffix = optimized.usedOptimizer ? "+mistral" : "";
 
     return optimized.variants.map((variant) => ({
       ...variant,
-      modelVersion: `groq:${env.GROQ_MODEL}${providerSuffix}`
+      modelVersion: `orchestrator:cascade${optimizerSuffix}`
     }));
   }
 
@@ -255,12 +257,11 @@ export class MultiAgentService {
   }
 
   private async generateWriterVariants(context: WriterContext): Promise<MetadataVariantDraft[] | null> {
-    const client = this.getGroqClient();
-    if (!client) {
+    if (!this.orchestrator.isAvailable) {
       return null;
     }
 
-    const prompt = JSON.stringify({
+    const promptContent = JSON.stringify({
       creatorName: context.creatorName,
       creatorNiche: context.creatorNiche ?? "general",
       creatorBrandVoice: context.creatorBrandVoice ?? "direct and energetic",
@@ -270,30 +271,43 @@ export class MultiAgentService {
       intelligence: context.intelligence
     });
 
-    const response = await client.chat.completions.create({
-      model: env.GROQ_MODEL,
-      temperature: 0.8,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Axora Writer. Return one JSON object with a `variants` array of exactly 3 metadata variants. Each variant must include variantKey, title, hook, caption, cta, thumbnailBrief, hashtags, keywords. Keep titles under 70 chars, captions compact, hashtags 3-5 entries, keywords 4-8 entries."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
+    const variantSchema = z.object({
+      variants: z.array(z.object({
+        variantKey: z.string(),
+        title: z.string(),
+        hook: z.string(),
+        caption: z.string(),
+        cta: z.string(),
+        thumbnailBrief: z.string(),
+        hashtags: z.array(z.string()),
+        keywords: z.array(z.string())
+      })).length(3)
     });
 
-    const content = response.choices[0]?.message?.content ?? "{}";
-    const parsed = safeJsonParse(content);
-    const rawVariants = Array.isArray(parsed?.variants) ? parsed.variants : [];
+    try {
+      const result = await this.orchestrator.complete({
+        prompt: [
+          {
+            role: "system",
+            content: "You are Axora Writer. Return one JSON object with a `variants` array of exactly 3 metadata variants. Each variant must include variantKey, title, hook, caption, cta, thumbnailBrief, hashtags, keywords. Keep titles under 70 chars, captions compact, hashtags 3-5 entries, keywords 4-8 entries."
+          },
+          {
+            role: "user",
+            content: promptContent
+          }
+        ],
+        schema: variantSchema,
+        temperature: 0.8,
+        maxTokens: 2048
+      });
 
-    return rawVariants
-      .map((entry, index) => normalizeVariant(entry, index))
-      .filter((entry): entry is MetadataVariantDraft => Boolean(entry));
+      const rawVariants = result.content.variants ?? [];
+      return rawVariants
+        .map((entry, index) => normalizeVariant(entry, index))
+        .filter((entry): entry is MetadataVariantDraft => Boolean(entry));
+    } catch {
+      return null;
+    }
   }
 
   private async optimizeVariants(
@@ -443,20 +457,6 @@ export class MultiAgentService {
     return "niche expert interest";
   }
 
-  private getGroqClient() {
-    if (!env.GROQ_API_KEY) {
-      return null;
-    }
-
-    if (!this.groqClient) {
-      this.groqClient = new OpenAI({
-        apiKey: env.GROQ_API_KEY,
-        baseURL: env.GROQ_BASE_URL
-      });
-    }
-
-    return this.groqClient;
-  }
 }
 
 function normalizeVariant(entry: unknown, index: number): MetadataVariantDraft | null {

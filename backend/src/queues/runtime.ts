@@ -1,34 +1,51 @@
 import { Worker } from "bullmq";
-import { addHours } from "date-fns";
 import { Platform, PostStatus } from "@prisma/client";
 
 import type { AppServices } from "../app.js";
 import { ValidationError } from "../lib/errors.js";
 import { withLeaderLock } from "../lib/leader-lock.js";
 import { isWeeklyReportWindow } from "../lib/time.js";
+import { getNextYouTubePostMetricDelayMinutes } from "../lib/youtube-freshness.js";
 import { buildJobId, getJobPolicy } from "./job-policy.js";
 import { JobName, QUEUE_NAME } from "./names.js";
 
-async function scheduleMetricRefresh(services: AppServices, postId: string, pollCount: number) {
-  const delays = [30, 6 * 60, 24 * 60, 48 * 60, 72 * 60, 96 * 60, 120 * 60, 144 * 60];
-  const nextDelayMinutes = delays[pollCount];
-
-  if (!nextDelayMinutes) {
-    return;
-  }
-
+export async function registerRecurringJobs(services: AppServices) {
   await services.queue.add(
-    JobName.MetricsRefresh,
-    { postId },
+    JobName.YouTubePostMetricsRefresh,
+    {},
     {
-      ...getJobPolicy(JobName.MetricsRefresh),
-      delay: nextDelayMinutes * 60 * 1000,
-      jobId: buildJobId(JobName.MetricsRefresh, `${postId}:${pollCount + 1}`)
+      ...getJobPolicy(JobName.YouTubePostMetricsRefresh),
+      repeat: {
+        every: 5 * 60 * 1000
+      },
+      jobId: "youtube-post-metrics-refresh-5m"
     }
   );
-}
 
-export async function registerRecurringJobs(services: AppServices) {
+  await services.queue.add(
+    JobName.YouTubeAnalyticsRefresh,
+    {},
+    {
+      ...getJobPolicy(JobName.YouTubeAnalyticsRefresh),
+      repeat: {
+        every: 15 * 60 * 1000
+      },
+      jobId: "youtube-analytics-refresh-15m"
+    }
+  );
+
+  await services.queue.add(
+    JobName.YouTubeCompetitorRefresh,
+    {},
+    {
+      ...getJobPolicy(JobName.YouTubeCompetitorRefresh),
+      repeat: {
+        every: 30 * 60 * 1000
+      },
+      jobId: "youtube-competitor-refresh-30m"
+    }
+  );
+
   await services.queue.add(
     JobName.OpportunityReport,
     {},
@@ -168,10 +185,6 @@ export function createWorker(services: AppServices) {
             const post = await services.prisma.platformPost.findUnique({
               where: { decisionId }
             });
-
-            if (post) {
-              await scheduleMetricRefresh(services, post.id, 0);
-            }
           } catch (error) {
             await services.quota.releaseReservation(
               Platform.YOUTUBE,
@@ -207,19 +220,46 @@ export function createWorker(services: AppServices) {
             }
           });
 
-          const pollCount = post.pollCount + 1;
+          const nextDelayMinutes = getNextYouTubePostMetricDelayMinutes(post.publishedAt);
           await services.prisma.platformPost.update({
             where: { id: postId },
             data: {
-              pollCount,
+              pollCount: post.pollCount + 1,
               lastPolledAt: new Date(),
               metrics: result.metrics,
-              nextPollAt: addHours(new Date(), 24)
+              nextPollAt:
+                nextDelayMinutes === null
+                  ? null
+                  : new Date(Date.now() + nextDelayMinutes * 60 * 1000)
             }
           });
 
           await services.optimization.recompute(post.workspaceId);
-          await scheduleMetricRefresh(services, postId, pollCount);
+          break;
+        }
+        case JobName.YouTubePostMetricsRefresh: {
+          const workspaceId = typeof job.data.workspaceId === "string" ? job.data.workspaceId : undefined;
+          const touchedWorkspaces = await services.youtubeHistory.refreshDuePostMetrics(workspaceId);
+          for (const touchedWorkspaceId of touchedWorkspaces) {
+            await services.queue.add(
+              JobName.OptimizationRecompute,
+              { workspaceId: touchedWorkspaceId },
+              {
+                ...getJobPolicy(JobName.OptimizationRecompute),
+                jobId: buildJobId(JobName.OptimizationRecompute, touchedWorkspaceId)
+              }
+            );
+          }
+          break;
+        }
+        case JobName.YouTubeAnalyticsRefresh: {
+          const workspaceId = typeof job.data.workspaceId === "string" ? job.data.workspaceId : undefined;
+          await services.youtubeHistory.refreshWorkspaceChannelAnalytics(workspaceId);
+          break;
+        }
+        case JobName.YouTubeCompetitorRefresh: {
+          const workspaceId = typeof job.data.workspaceId === "string" ? job.data.workspaceId : undefined;
+          await services.youtubeHistory.refreshWorkspaceCompetitors(workspaceId);
           break;
         }
         case JobName.YouTubeChannelSync: {
@@ -237,6 +277,13 @@ export function createWorker(services: AppServices) {
           await services.youtubeHistory.captureVideoSnapshot(videoId);
           break;
         }
+        case JobName.IntelligenceOverviewRefresh: {
+          const workspaceId = asString(job.data.workspaceId);
+          await services.youtubeHistory.refreshWorkspaceChannelAnalytics(workspaceId);
+          await services.youtubeHistory.refreshDuePostMetrics(workspaceId);
+          await services.youtubeHistory.refreshWorkspaceCompetitors(workspaceId);
+          break;
+        }
         case JobName.OptimizationRecompute: {
           const workspaceId = asString(job.data.workspaceId);
           await services.optimization.recompute(workspaceId);
@@ -251,7 +298,7 @@ export function createWorker(services: AppServices) {
                   where: {
                     workspaceId: workspace.id,
                     generatedAt: {
-                      gte: addHours(new Date(), -12)
+                      gte: new Date(Date.now() - 12 * 60 * 60 * 1000)
                     }
                   }
                 });

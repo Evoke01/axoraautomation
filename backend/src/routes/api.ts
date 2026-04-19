@@ -7,6 +7,8 @@ import {
   uploadInitSchema,
   uploadPartUrlSchema
 } from "../types/domain.js";
+import { buildJobId, getJobPolicy } from "../queues/job-policy.js";
+import { JobName } from "../queues/names.js";
 
 export async function registerApiRoutes(app: FastifyInstance) {
   app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
@@ -135,8 +137,34 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return app.services.dashboard.latestOpportunityReport(session.workspace.id);
   });
 
+  app.get("/intelligence/overview", async (request) => {
+    const session = await app.services.auth.resolveSession(request.headers);
+    return app.services.dashboard.getIntelligenceOverview(session.workspace.id);
+  });
+
+  app.post("/intelligence/refresh", async (request) => {
+    const session = await app.services.auth.resolveSession(request.headers);
+    await app.services.queue.add(
+      JobName.IntelligenceOverviewRefresh,
+      { workspaceId: session.workspace.id },
+      {
+        ...getJobPolicy(JobName.IntelligenceOverviewRefresh),
+        jobId: buildJobId(JobName.IntelligenceOverviewRefresh, session.workspace.id)
+      }
+    );
+    return { queued: true };
+  });
+
   app.post("/intelligence/generate", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
+    await app.services.queue.add(
+      JobName.IntelligenceOverviewRefresh,
+      { workspaceId: session.workspace.id },
+      {
+        ...getJobPolicy(JobName.IntelligenceOverviewRefresh),
+        jobId: buildJobId(JobName.IntelligenceOverviewRefresh, session.workspace.id)
+      }
+    );
     const report = await app.services.optimization.generateOpportunityReport(session.workspace.id, session.workspace.timezone);
     return { success: true, report };
   });

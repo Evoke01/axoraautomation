@@ -149,9 +149,12 @@ model Workspace {
   auditLogs             AuditLog[]
   oauthStates           OAuthState[]
   youtubeChannels       YoutubeChannel[]
+  youtubeChannelSnapshots YoutubeChannelSnapshot[]
+  youtubeChannelSeriesPoints YoutubeChannelSeriesPoint[]
   youtubeVideos         YoutubeVideo[]
   trendWindows          ChannelTrendWindow[]
   youtubeVideoSnapshots YoutubeVideoSnapshot[]
+  competitorVideos      CompetitorVideo[]
 }
 
 model User {
@@ -453,11 +456,16 @@ model CompetitorChannel {
   platform          Platform
   externalChannelId String
   name              String
+  subscriberCount   Int?
+  videoCount        Int?
+  viewCount         Int?
+  lastSyncedAt      DateTime?
   topicKeywords     Json
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
   workspace         Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   observations      CompetitorObservation[]
+  videos            CompetitorVideo[]
 
   @@unique([workspaceId, platform, externalChannelId])
 }
@@ -474,6 +482,32 @@ model CompetitorObservation {
   topicKeywords       Json
   rawMetrics          Json
   competitorChannel   CompetitorChannel @relation(fields: [competitorChannelId], references: [id], onDelete: Cascade)
+}
+
+model CompetitorVideo {
+  id                  String            @id @default(cuid())
+  workspaceId         String
+  competitorChannelId String
+  externalVideoId     String
+  title               String
+  description         String?
+  publishedAt         DateTime
+  durationSeconds     Int?
+  tags                Json?
+  views               Int               @default(0)
+  likes               Int               @default(0)
+  comments            Int               @default(0)
+  velocityPerHour     Float?
+  rawPayload          Json?
+  lastSyncedAt        DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  competitorChannel   CompetitorChannel @relation(fields: [competitorChannelId], references: [id], onDelete: Cascade)
+
+  @@unique([competitorChannelId, externalVideoId])
+  @@index([workspaceId, publishedAt(sort: Desc)])
+  @@index([competitorChannelId, lastSyncedAt(sort: Desc)])
 }
 
 model OpportunityReport {
@@ -500,12 +534,55 @@ model YoutubeChannel {
   updatedAt          DateTime               @updatedAt
   workspace          Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   connectedAccount   ConnectedAccount       @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+  snapshots          YoutubeChannelSnapshot[]
+  seriesPoints       YoutubeChannelSeriesPoint[]
   videos             YoutubeVideo[]
   trendWindows       ChannelTrendWindow[]
   videoSnapshots     YoutubeVideoSnapshot[]
 
   @@unique([workspaceId, externalChannelId])
   @@index([workspaceId, lastSyncedAt])
+}
+
+model YoutubeChannelSnapshot {
+  id                     String         @id @default(cuid())
+  workspaceId            String
+  channelId              String
+  capturedAt             DateTime       @default(now())
+  totalViews             Int            @default(0)
+  totalSubscribers       Int?
+  totalVideos            Int            @default(0)
+  recentViews            Int?
+  recentLikes            Int?
+  recentComments         Int?
+  watchTimeMinutes       Float?
+  averageViewDurationSec Float?
+  rawMetrics             Json
+  workspace              Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel                YoutubeChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, capturedAt(sort: Desc)])
+  @@index([workspaceId, capturedAt(sort: Desc)])
+}
+
+model YoutubeChannelSeriesPoint {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  channelId        String
+  granularity      String
+  bucketStart      DateTime
+  views            Int            @default(0)
+  likes            Int?
+  comments         Int?
+  watchTimeMinutes Float?
+  rawMetrics       Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel          YoutubeChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, granularity, bucketStart])
+  @@index([workspaceId, granularity, bucketStart(sort: Desc)])
 }
 
 model YoutubeVideo {

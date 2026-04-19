@@ -48,6 +48,24 @@ const policyByJobName: Record<JobName, JobsOptions> = {
     removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
     removeOnFail: DEFAULT_REMOVE_ON_FAIL
   },
+  [JobName.YouTubeAnalyticsRefresh]: {
+    attempts: 4,
+    backoff: { type: "exponential", delay: 30_000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
+  [JobName.YouTubePostMetricsRefresh]: {
+    attempts: 4,
+    backoff: { type: "fixed", delay: 30_000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
+  [JobName.YouTubeCompetitorRefresh]: {
+    attempts: 4,
+    backoff: { type: "exponential", delay: 30_000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
   [JobName.YouTubeChannelSync]: {
     attempts: 4,
     backoff: { type: "exponential", delay: 30_000 },
@@ -63,6 +81,12 @@ const policyByJobName: Record<JobName, JobsOptions> = {
   [JobName.YouTubeMetricsSnapshot]: {
     attempts: 4,
     backoff: { type: "exponential", delay: 20_000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
+  [JobName.IntelligenceOverviewRefresh]: {
+    attempts: 4,
+    backoff: { type: "fixed", delay: 30_000 },
     removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
     removeOnFail: DEFAULT_REMOVE_ON_FAIL
   },

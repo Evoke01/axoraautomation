@@ -57,11 +57,16 @@ const envSchema = z.object({
   COHERE_API_URL: z.string().url().default("https://api.cohere.com/v2/chat"),
   COHERE_MODEL: z.string().default("command-r-08-2024"),
   HF_API_TOKEN: z.string().optional(),
+  HF_TEXT_MODEL: z.string().optional(),
+  HF_EMBEDDING_MODEL: z.string().optional(),
   HF_ZERO_SHOT_MODEL: z.string().default("facebook/bart-large-mnli"),
   HF_INFERENCE_BASE_URL: z
     .string()
     .url()
     .default("https://router.huggingface.co/hf-inference/models"),
+  OLLAMA_BASE_URL: z.string().url().optional(),
+  OLLAMA_MODEL: z.string().optional(),
+  OLLAMA_EMBEDDING_MODEL: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().url().optional(),
   OPENAI_MODEL: z.string().default("deepseek-chat"),

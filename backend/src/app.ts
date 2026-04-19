@@ -32,6 +32,7 @@ import { StoragePurgeService } from "./services/storage-purge-service.js";
 import { QuotaService } from "./services/quota-service.js";
 import { UploadService } from "./services/upload-service.js";
 import { YouTubeHistoryService } from "./services/youtube-history-service.js";
+import { createCascadeAI } from "./ai/factory.js";
 
 export type AppServices = {
   env: typeof env;
@@ -76,7 +77,8 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const uploads = new UploadService(prisma, storage);
   const assets = new AssetService(prisma, queue, audit);
   const validation = new AssetValidationService(prisma, storage, audit);
-  const agents = new MultiAgentService(prisma);
+  const aiOrchestrator = createCascadeAI();
+  const agents = new MultiAgentService(prisma, aiOrchestrator);
   const intelligence = new IntelligenceService(prisma, storage, agents);
   const metadata = new MetadataService(prisma, agents);
   const quota = new QuotaService(prisma);

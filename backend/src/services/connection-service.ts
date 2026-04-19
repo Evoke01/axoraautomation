@@ -1,6 +1,7 @@
 import { Platform, type PrismaClient } from "@prisma/client";
 
 import { env } from "../config/env.js";
+import { hasYouTubeAnalyticsScope } from "../adapters/youtube-adapter.js";
 import { getPacificQuotaDate } from "../lib/time.js";
 import { AuditService } from "./audit-service.js";
 
@@ -15,7 +16,7 @@ const PLATFORM_CATALOG: Record<
   [Platform.YOUTUBE]: {
     label: "YouTube",
     connectable: true,
-    defaultNote: "Ready for channel OAuth, uploads, and metrics polling."
+    defaultNote: "Ready for channel OAuth, uploads, near-real-time metrics, and channel analytics."
   },
   [Platform.INSTAGRAM]: {
     label: "Instagram",
@@ -140,6 +141,7 @@ function buildPlatformNote(
     | {
         status: string;
         tokenExpiresAt: Date | null;
+        scopes?: unknown;
       }
     | null,
   configured: boolean,
@@ -159,6 +161,10 @@ function buildPlatformNote(
 
   if (account.status === "REAUTH_REQUIRED") {
     return "Connection requires reauthentication before Axora can act on it.";
+  }
+
+  if (platform === Platform.YOUTUBE && !hasYouTubeAnalyticsScope((account as { scopes?: unknown }).scopes)) {
+    return "Reconnect YouTube to grant Analytics access for channel totals and the intelligence tab.";
   }
 
   if (platform === Platform.YOUTUBE && quotaLedger) {

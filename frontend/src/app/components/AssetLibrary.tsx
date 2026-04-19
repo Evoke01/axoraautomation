@@ -24,11 +24,14 @@ function getStage(asset: ApiAsset): string {
 }
 
 function getTotalViews(asset: ApiAsset): number {
+  if (typeof asset.totalViews === 'number') {
+    return asset.totalViews;
+  }
+
   return asset.campaigns
     .flatMap((campaign) => campaign.waves)
     .flatMap((wave) => wave.decisions)
-    .flatMap((decision) => decision.post?.snapshots ?? [])
-    .reduce((sum, snapshot) => sum + (snapshot.views ?? 0), 0);
+    .reduce((sum, decision) => sum + (decision.post?.metrics?.views ?? decision.post?.snapshots?.[0]?.views ?? 0), 0);
 }
 
 function formatViews(n: number): string {
@@ -58,11 +61,21 @@ export function AssetLibrary() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    api.assets
-      .list()
-      .then(setAssets)
-      .catch(() => setAssets([]))
-      .finally(() => setLoading(false));
+    const load = () =>
+      api.assets
+        .list()
+        .then(setAssets)
+        .catch(() => setAssets([]))
+        .finally(() => setLoading(false));
+
+    void load();
+    const interval = window.setInterval(() => void load(), 60_000);
+    const handleFocus = () => void load();
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   if (loading) {
@@ -221,8 +234,8 @@ export function AssetLibrary() {
                           {allWaves.flatMap((wave) =>
                             wave.decisions.map((decision) => {
                               const snapshot = decision.post?.snapshots?.[0];
-                              const views = snapshot?.views ?? 0;
-                              const likes = snapshot?.likes ?? 0;
+                              const views = decision.post?.metrics?.views ?? snapshot?.views ?? 0;
+                              const likes = decision.post?.metrics?.likes ?? snapshot?.likes ?? 0;
                               const engagement = views > 0 ? `${((likes / views) * 100).toFixed(1)}%` : '--';
 
                               return (

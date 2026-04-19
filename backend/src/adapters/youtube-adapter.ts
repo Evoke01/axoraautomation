@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import { eachDayOfInterval, subDays } from "date-fns";
 import { google, type youtube_v3 } from "googleapis";
 import { ConnectedAccountStatus, Platform, PostStatus, type PrismaClient } from "@prisma/client";
 
@@ -9,9 +10,12 @@ import { AuthError, NotFoundError } from "../lib/errors.js";
 import type { StorageService } from "../lib/storage.js";
 import { AuditService } from "../services/audit-service.js";
 
-const YOUTUBE_SCOPES = [
+export const YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly";
+
+export const YOUTUBE_SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
-  "https://www.googleapis.com/auth/youtube"
+  "https://www.googleapis.com/auth/youtube",
+  YOUTUBE_ANALYTICS_SCOPE
 ];
 
 export type YouTubeChannelVideo = {
@@ -22,6 +26,40 @@ export type YouTubeChannelVideo = {
   durationSeconds: number | null;
   tags: string[];
   rawPayload: Record<string, unknown>;
+};
+
+export type YouTubePublicVideo = YouTubeChannelVideo & {
+  views: number;
+  likes: number;
+  comments: number;
+};
+
+export type YouTubeChannelStatistics = {
+  channelId: string;
+  title: string;
+  description: string;
+  totalViews: number;
+  subscriberCount: number | null;
+  totalVideos: number;
+  rawPayload: Record<string, unknown>;
+};
+
+export type YouTubePublicChannelStatistics = {
+  channelId: string;
+  title: string;
+  description: string;
+  subscriberCount: number | null;
+  totalVideos: number | null;
+  totalViews: number | null;
+  rawPayload: Record<string, unknown>;
+};
+
+export type YouTubeChannelAnalyticsPoint = {
+  day: Date;
+  views: number;
+  likes: number;
+  comments: number;
+  watchTimeMinutes: number;
 };
 
 export class YouTubeAdapter {
@@ -84,7 +122,7 @@ export class YouTubeAdapter {
     const youtube = google.youtube({ version: "v3", auth: client });
     const channelResponse = await youtube.channels.list({
       mine: true,
-      part: ["snippet"]
+      part: ["snippet", "statistics"]
     });
 
     const channel = channelResponse.data.items?.[0];
@@ -99,6 +137,7 @@ export class YouTubeAdapter {
       }
     });
 
+    const grantedScopes = normalizeScopes(tokens.scope ?? existing?.scopes ?? YOUTUBE_SCOPES);
     const data = {
       accountLabel,
       status: ConnectedAccountStatus.ACTIVE,
@@ -106,9 +145,12 @@ export class YouTubeAdapter {
       accessTokenEncrypted: tokens.access_token ? encryptValue(tokens.access_token) : existing?.accessTokenEncrypted,
       refreshTokenEncrypted: tokens.refresh_token ? encryptValue(tokens.refresh_token) : existing?.refreshTokenEncrypted,
       tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : existing?.tokenExpiresAt,
-      scopes: YOUTUBE_SCOPES,
+      scopes: grantedScopes,
       metadata: {
-        channelTitle: accountLabel
+        channelTitle: accountLabel,
+        analyticsEnabled: hasYouTubeAnalyticsScope(grantedScopes),
+        subscriberCount: Number(channel?.statistics?.subscriberCount ?? 0),
+        videoCount: Number(channel?.statistics?.videoCount ?? 0)
       }
     };
 
@@ -132,7 +174,11 @@ export class YouTubeAdapter {
       eventType: "youtube.account_connected",
       targetType: "ACCOUNT",
       targetId: account.id,
-      payload: { channelId, accountLabel }
+      payload: {
+        channelId,
+        accountLabel,
+        analyticsEnabled: hasYouTubeAnalyticsScope(grantedScopes)
+      }
     });
 
     return account;
@@ -188,6 +234,174 @@ export class YouTubeAdapter {
     }
 
     return client;
+  }
+
+  async getOwnChannelStatistics(accountId: string): Promise<YouTubeChannelStatistics | null> {
+    if (this.shouldUseMock()) {
+      return {
+        channelId: `mock-channel-${accountId.slice(0, 6)}`,
+        title: "Mock Axora Channel",
+        description: "Mock channel statistics for local development.",
+        totalViews: 125_000,
+        subscriberCount: 12_400,
+        totalVideos: 87,
+        rawPayload: { mock: true }
+      };
+    }
+
+    const client = await this.ensureFresh(accountId, 30);
+    const youtube = google.youtube({ version: "v3", auth: client });
+    const response = await youtube.channels.list({
+      mine: true,
+      part: ["snippet", "statistics"]
+    });
+
+    const channel = response.data.items?.[0];
+    if (!channel?.id) {
+      return null;
+    }
+
+    return {
+      channelId: channel.id,
+      title: channel.snippet?.title ?? "YouTube Channel",
+      description: channel.snippet?.description ?? "",
+      totalViews: Number(channel.statistics?.viewCount ?? 0),
+      subscriberCount:
+        typeof channel.statistics?.subscriberCount === "string"
+          ? Number(channel.statistics.subscriberCount)
+          : null,
+      totalVideos: Number(channel.statistics?.videoCount ?? 0),
+      rawPayload: JSON.parse(JSON.stringify(channel)) as Record<string, unknown>
+    };
+  }
+
+  async getChannelDailyAnalytics(accountId: string, startDate: string, endDate: string) {
+    if (this.shouldUseMock()) {
+      return createMockAnalyticsSeries(startDate, endDate);
+    }
+
+    await this.assertAnalyticsScope(accountId);
+    const client = await this.ensureFresh(accountId, 30);
+    const youtubeAnalytics = google.youtubeAnalytics({ version: "v2", auth: client });
+    const response = await youtubeAnalytics.reports.query({
+      ids: "channel==MINE",
+      startDate,
+      endDate,
+      metrics: "views,likes,comments,estimatedMinutesWatched",
+      dimensions: "day",
+      sort: "day"
+    });
+
+    return parseDailyAnalyticsRows(response.data);
+  }
+
+  async listPublicChannelVideos(accountId: string, externalChannelId: string, maxResults = 12): Promise<YouTubePublicVideo[]> {
+    if (this.shouldUseMock()) {
+      return createMockPublicVideos(externalChannelId, maxResults);
+    }
+
+    const client = await this.ensureFresh(accountId, 30);
+    const youtube = google.youtube({ version: "v3", auth: client });
+    const channelResponse = await youtube.channels.list({
+      id: [externalChannelId],
+      part: ["contentDetails"]
+    });
+
+    const uploadsPlaylistId =
+      channelResponse.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+
+    if (!uploadsPlaylistId) {
+      return [];
+    }
+
+    const playlistItems = await youtube.playlistItems.list({
+      playlistId: uploadsPlaylistId,
+      part: ["contentDetails"],
+      maxResults
+    });
+
+    const videoIds =
+      playlistItems.data.items
+        ?.map((item) => item.contentDetails?.videoId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0) ?? [];
+
+    if (videoIds.length === 0) {
+      return [];
+    }
+
+    const videosResponse = await youtube.videos.list({
+      id: videoIds,
+      part: ["snippet", "contentDetails", "statistics"]
+    });
+
+    return (
+      videosResponse.data.items
+        ?.map((video) => {
+          if (!video.id) {
+            return null;
+          }
+
+          const rawPayload = JSON.parse(JSON.stringify(video)) as Record<string, unknown>;
+          return {
+            externalVideoId: video.id,
+            title: video.snippet?.title ?? "Untitled",
+            description: video.snippet?.description ?? "",
+            publishedAt: video.snippet?.publishedAt ? new Date(video.snippet.publishedAt) : new Date(),
+            durationSeconds: parseIsoDurationToSeconds(video.contentDetails?.duration ?? undefined),
+            tags: video.snippet?.tags ?? [],
+            views: Number(video.statistics?.viewCount ?? 0),
+            likes: Number(video.statistics?.likeCount ?? 0),
+            comments: Number(video.statistics?.commentCount ?? 0),
+            rawPayload
+          } satisfies YouTubePublicVideo;
+        })
+        .filter((video): video is YouTubePublicVideo => Boolean(video)) ?? []
+    );
+  }
+
+  async getPublicChannelStatistics(accountId: string, externalChannelId: string): Promise<YouTubePublicChannelStatistics | null> {
+    if (this.shouldUseMock()) {
+      return {
+        channelId: externalChannelId,
+        title: `Competitor ${externalChannelId.slice(0, 4)}`,
+        description: "Mock public competitor channel.",
+        subscriberCount: 52_000,
+        totalVideos: 214,
+        totalViews: 3_400_000,
+        rawPayload: { mock: true }
+      };
+    }
+
+    const client = await this.ensureFresh(accountId, 30);
+    const youtube = google.youtube({ version: "v3", auth: client });
+    const response = await youtube.channels.list({
+      id: [externalChannelId],
+      part: ["snippet", "statistics"]
+    });
+
+    const channel = response.data.items?.[0];
+    if (!channel?.id) {
+      return null;
+    }
+
+    return {
+      channelId: channel.id,
+      title: channel.snippet?.title ?? "Unknown channel",
+      description: channel.snippet?.description ?? "",
+      subscriberCount:
+        typeof channel.statistics?.subscriberCount === "string"
+          ? Number(channel.statistics.subscriberCount)
+          : null,
+      totalVideos:
+        typeof channel.statistics?.videoCount === "string"
+          ? Number(channel.statistics.videoCount)
+          : null,
+      totalViews:
+        typeof channel.statistics?.viewCount === "string"
+          ? Number(channel.statistics.viewCount)
+          : null,
+      rawPayload: JSON.parse(JSON.stringify(channel)) as Record<string, unknown>
+    };
   }
 
   async publish(decisionId: string) {
@@ -264,7 +478,7 @@ export class YouTubeAdapter {
         externalUrl,
         status: PostStatus.PUBLISHED,
         publishedAt: new Date(),
-        nextPollAt: new Date(Date.now() + 30 * 60 * 1000)
+        nextPollAt: new Date(Date.now() + 5 * 60 * 1000)
       },
       create: {
         workspaceId: asset.workspaceId,
@@ -276,7 +490,7 @@ export class YouTubeAdapter {
         externalUrl,
         status: PostStatus.PUBLISHED,
         publishedAt: new Date(),
-        nextPollAt: new Date(Date.now() + 30 * 60 * 1000)
+        nextPollAt: new Date(Date.now() + 5 * 60 * 1000)
       }
     });
 
@@ -320,7 +534,7 @@ export class YouTubeAdapter {
         externalUrl: `https://youtube.local/watch?v=${mockVideoId}`,
         status: PostStatus.PUBLISHED,
         publishedAt: new Date(),
-        nextPollAt: new Date(Date.now() + 30 * 60 * 1000)
+        nextPollAt: new Date(Date.now() + 5 * 60 * 1000)
       },
       create: {
         workspaceId: decision.campaignWave.campaign.asset.workspaceId,
@@ -332,7 +546,7 @@ export class YouTubeAdapter {
         externalUrl: `https://youtube.local/watch?v=${mockVideoId}`,
         status: PostStatus.PUBLISHED,
         publishedAt: new Date(),
-        nextPollAt: new Date(Date.now() + 30 * 60 * 1000)
+        nextPollAt: new Date(Date.now() + 5 * 60 * 1000)
       }
     });
   }
@@ -356,6 +570,7 @@ export class YouTubeAdapter {
       if (!this.shouldUseMock()) {
         return [];
       }
+
       return posts.map((post) => ({
         postId: post.id,
         metrics: {
@@ -471,6 +686,34 @@ export class YouTubeAdapter {
     );
   }
 
+  async hasAnalyticsAccess(accountId: string) {
+    const account = await this.prisma.connectedAccount.findUnique({
+      where: { id: accountId }
+    });
+
+    if (!account) {
+      return false;
+    }
+
+    return hasYouTubeAnalyticsScope(account.scopes);
+  }
+
+  private async assertAnalyticsScope(accountId: string) {
+    const account = await this.prisma.connectedAccount.findUnique({
+      where: { id: accountId }
+    });
+
+    if (!account || account.platform !== Platform.YOUTUBE) {
+      throw new NotFoundError("YouTube account not found.");
+    }
+
+    if (!hasYouTubeAnalyticsScope(account.scopes)) {
+      throw new AuthError("Reconnect YouTube to grant analytics access.");
+    }
+
+    return account;
+  }
+
   private shouldUseMock() {
     const credentialsConfigured = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI);
     return canUseYouTubeMock({
@@ -479,6 +722,47 @@ export class YouTubeAdapter {
       nodeEnv: env.NODE_ENV
     });
   }
+}
+
+function parseDailyAnalyticsRows(
+  payload: {
+    columnHeaders?: Array<{ name?: string | null }>;
+    rows?: unknown[][] | null;
+  } | null | undefined
+): YouTubeChannelAnalyticsPoint[] {
+  const headers = payload?.columnHeaders?.map((header) => header.name ?? "") ?? [];
+  const rows = payload?.rows ?? [];
+
+  return rows
+    .map((row) => {
+      const record = new Map(headers.map((header, index) => [header, row[index]] as const));
+      const day = record.get("day");
+      if (typeof day !== "string") {
+        return null;
+      }
+
+      return {
+        day: new Date(`${day}T00:00:00.000Z`),
+        views: toNumber(record.get("views")),
+        likes: toNumber(record.get("likes")),
+        comments: toNumber(record.get("comments")),
+        watchTimeMinutes: toNumber(record.get("estimatedMinutesWatched"))
+      } satisfies YouTubeChannelAnalyticsPoint;
+    })
+    .filter((row): row is YouTubeChannelAnalyticsPoint => Boolean(row));
+}
+
+function toNumber(value: unknown) {
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  return 0;
 }
 
 function parseIsoDurationToSeconds(duration: string | undefined): number | null {
@@ -495,6 +779,57 @@ function parseIsoDurationToSeconds(duration: string | undefined): number | null 
   const minutes = Number(matches[2] ?? 0);
   const seconds = Number(matches[3] ?? 0);
   return hours * 3600 + minutes * 60 + seconds;
+}
+
+function createMockAnalyticsSeries(startDate: string, endDate: string): YouTubeChannelAnalyticsPoint[] {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+
+  return eachDayOfInterval({ start, end }).map((day, index) => ({
+    day,
+    views: 1200 + index * 135,
+    likes: 90 + index * 7,
+    comments: 18 + index * 2,
+    watchTimeMinutes: 480 + index * 40
+  }));
+}
+
+function createMockPublicVideos(externalChannelId: string, maxResults: number): YouTubePublicVideo[] {
+  return Array.from({ length: Math.min(6, maxResults) }, (_, index) => {
+    const publishedAt = subDays(new Date(), index);
+    const views = 18_000 - index * 1700;
+    return {
+      externalVideoId: `${externalChannelId}-video-${index + 1}`,
+      title: `Competitor video ${index + 1}`,
+      description: "Mock competitor video for local development.",
+      publishedAt,
+      durationSeconds: 42 + index * 9,
+      tags: ["growth", "youtube", "creator"],
+      views,
+      likes: Math.round(views * 0.06),
+      comments: Math.round(views * 0.008),
+      rawPayload: { mock: true, index }
+    };
+  });
+}
+
+export function normalizeScopes(scopes: unknown): string[] {
+  if (Array.isArray(scopes)) {
+    return scopes.filter((scope): scope is string => typeof scope === "string" && scope.length > 0);
+  }
+
+  if (typeof scopes === "string") {
+    return scopes
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+export function hasYouTubeAnalyticsScope(scopes: unknown) {
+  return normalizeScopes(scopes).includes(YOUTUBE_ANALYTICS_SCOPE);
 }
 
 export function canUseYouTubeMock(input: { credentialsConfigured: boolean; allowMock: boolean; nodeEnv: string }) {

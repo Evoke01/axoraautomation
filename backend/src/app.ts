@@ -118,8 +118,15 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     tiktok
   });
 
+  const corsOrigins: (string | RegExp)[] = [
+    /^http:\/\/localhost(:\d+)?$/   // always allow localhost dev
+  ];
+  if (env.FRONTEND_APP_URL) {
+    corsOrigins.push(env.FRONTEND_APP_URL.replace(/\/+$/, "")); // strip trailing slash
+  }
+
   await app.register(cors, {
-    origin: env.FRONTEND_APP_URL || true,
+    origin: corsOrigins.length > 0 ? corsOrigins : true,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],

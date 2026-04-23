@@ -119,6 +119,12 @@ const policyByJobName: Record<JobName, JobsOptions> = {
     backoff: { type: "fixed", delay: 30_000 },
     removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
     removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
+  [JobName.DripFeedCheck]: {
+    attempts: 2,
+    backoff: { type: "fixed", delay: 10_000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
   }
 };
 

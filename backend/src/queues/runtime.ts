@@ -82,6 +82,18 @@ export async function registerRecurringJobs(services: AppServices) {
       jobId: "youtube-channel-sync-6h"
     }
   );
+
+  await services.queue.add(
+    JobName.DripFeedCheck,
+    {},
+    {
+      ...getJobPolicy(JobName.DripFeedCheck),
+      repeat: {
+        every: 10 * 60 * 1000 // Every 10 minutes
+      },
+      jobId: "drip-feed-check-10m"
+    }
+  );
 }
 
 export function createWorker(services: AppServices) {
@@ -110,10 +122,7 @@ export function createWorker(services: AppServices) {
         case JobName.MetadataGenerate: {
           const assetId = asString(job.data.assetId);
           await services.metadata.generate(assetId);
-          await services.queue.add(JobName.CampaignPlan, { assetId }, {
-            ...getJobPolicy(JobName.CampaignPlan),
-            jobId: buildJobId(JobName.CampaignPlan, assetId)
-          });
+          // Wait for DripFeedCheck to push to CampaignPlan instead of doing it immediately
           break;
         }
         case JobName.CampaignPlan: {
@@ -344,6 +353,42 @@ export function createWorker(services: AppServices) {
 
                 if (!recentReport) {
                   await services.optimization.generateOpportunityReport(workspace.id, workspace.timezone);
+                }
+              }
+            }
+          });
+          break;
+        }
+        case JobName.DripFeedCheck: {
+          await withLeaderLock(services.redis, "leader:drip-feed-check", 2 * 60 * 1000, async () => {
+            const creators = await services.prisma.creator.findMany({ select: { id: true } });
+            
+            for (const creator of creators) {
+              const activeCampaignsCount = await services.prisma.campaign.count({
+                where: {
+                  asset: { creatorId: creator.id },
+                  status: { in: ["ACTIVE", "DRAFT"] }
+                }
+              });
+
+              if (activeCampaignsCount < 2) {
+                const availableSlots = 2 - activeCampaignsCount;
+                
+                const waitingAssets = await services.prisma.asset.findMany({
+                  where: {
+                    creatorId: creator.id,
+                    status: "READY",
+                    campaigns: { none: {} }
+                  },
+                  orderBy: { createdAt: "asc" },
+                  take: availableSlots
+                });
+
+                for (const asset of waitingAssets) {
+                  await services.queue.add(JobName.CampaignPlan, { assetId: asset.id }, {
+                    ...getJobPolicy(JobName.CampaignPlan),
+                    jobId: buildJobId(JobName.CampaignPlan, asset.id)
+                  });
                 }
               }
             }

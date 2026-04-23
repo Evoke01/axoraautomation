@@ -20,11 +20,17 @@ import { MultiAgentService } from "./multi-agent-service.js";
 function pickPublishTime(timezone: string) {
   const zonedNow = toZonedTime(new Date(), timezone);
   const scheduled = new Date(zonedNow);
-  scheduled.setHours(18, 0, 0, 0);
+  
+  // Pick an organic time: 17:30 (5:30 PM) is a better fallback
+  scheduled.setHours(17, 30, 0, 0);
 
   if (scheduled <= zonedNow) {
     scheduled.setDate(scheduled.getDate() + 1);
   }
+
+  // Add random organic jitter (± 15 minutes)
+  const jitterMinutes = Math.floor(Math.random() * 30) - 15;
+  scheduled.setMinutes(scheduled.getMinutes() + jitterMinutes);
 
   return fromZonedTime(scheduled, timezone);
 }
@@ -40,6 +46,10 @@ function pickScheduledSlotFromVariant(timezone: string, dayOfWeek: number, hourL
   if (scheduled <= zonedNow) {
     scheduled.setDate(scheduled.getDate() + 7);
   }
+
+  // Add random organic jitter (± 15 minutes)
+  const jitterMinutes = Math.floor(Math.random() * 30) - 15;
+  scheduled.setMinutes(scheduled.getMinutes() + jitterMinutes);
 
   return fromZonedTime(scheduled, timezone);
 }

@@ -19,7 +19,8 @@ export const JobName = {
   IntelligenceOverviewRefresh: "intelligence.overview.refresh",
   OptimizationRecompute: "optimization.recompute",
   OpportunityReport: "opportunity.report",
-  AuditRetention: "audit.retention"
+  AuditRetention: "audit.retention",
+  DripFeedCheck: "drip-feed.check"
 } as const;
 
 export type JobName = (typeof JobName)[keyof typeof JobName];

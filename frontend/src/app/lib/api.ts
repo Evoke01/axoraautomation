@@ -63,9 +63,19 @@ export interface ApiAsset {
   metadataVariants?: Array<{
     id: string;
     platform: string;
+    variantKey?: string;
+    angle?: string | null;
     title: string;
     caption: string;
+    hook?: string;
     thumbnailBrief: string;
+    score?: number;
+    isSelected?: boolean;
+    reasoning?: string | null;
+    niche?: string | null;
+    viralScore?: number | null;
+    scheduledDay?: number | null;
+    scheduledHour?: number | null;
   }>;
   campaigns: Array<{
     id: string;
@@ -219,6 +229,17 @@ export interface ApiIntelligenceOverview {
       sourceFreshnessMinutes: number | null;
     }>;
   };
+  creatorProfile: {
+    sampleSize: number;
+    confidence: number;
+    bestTitlePatterns: string[];
+    avoidTitlePatterns: string[];
+    bestPublishWindows: string[];
+    bestThumbnailStyles: string[];
+    bestKeywords: string[];
+    bestAngles: string[];
+    lastLearnedAt: string | null;
+  };
   weeklyBrief: {
     generatedAt: string;
     status: string;
@@ -286,6 +307,7 @@ export const api = {
     overview: () => request<ApiIntelligenceOverview>("/intelligence/overview"),
     weekly: () => request<{ report: { opportunities: any[]; competitors: any[] }; generatedAt: string } | null>("/intelligence/weekly"),
     refresh: () => request<{ queued: boolean }>("/intelligence/refresh", { method: "POST" }),
+    refreshLearning: () => request<{ queued: boolean; creators: number }>("/intelligence/learning/refresh", { method: "POST" }),
     generate: () => request<{ success: boolean }>("/intelligence/generate", { method: "POST" }),
   }
 };

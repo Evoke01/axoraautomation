@@ -48,6 +48,18 @@ const policyByJobName: Record<JobName, JobsOptions> = {
     removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
     removeOnFail: DEFAULT_REMOVE_ON_FAIL
   },
+  [JobName.MetricsCheckpointCapture]: {
+    attempts: 8,
+    backoff: { type: "exponential", delay: 15 * 60 * 1000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
+  [JobName.LearningRun]: {
+    attempts: 4,
+    backoff: { type: "exponential", delay: 60_000 },
+    removeOnComplete: DEFAULT_REMOVE_ON_COMPLETE,
+    removeOnFail: DEFAULT_REMOVE_ON_FAIL
+  },
   [JobName.YouTubeAnalyticsRefresh]: {
     attempts: 4,
     backoff: { type: "exponential", delay: 30_000 },

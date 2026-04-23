@@ -14,6 +14,7 @@ import { NotFoundError, ValidationError } from "../lib/errors.js";
 import { buildJobId, getJobPolicy } from "../queues/job-policy.js";
 import { JobName } from "../queues/names.js";
 import { AuditService } from "./audit-service.js";
+import { buildCreatorProfilePack } from "./learning-service.js";
 import { MultiAgentService } from "./multi-agent-service.js";
 
 function pickPublishTime(timezone: string) {
@@ -23,6 +24,21 @@ function pickPublishTime(timezone: string) {
 
   if (scheduled <= zonedNow) {
     scheduled.setDate(scheduled.getDate() + 1);
+  }
+
+  return fromZonedTime(scheduled, timezone);
+}
+
+function pickScheduledSlotFromVariant(timezone: string, dayOfWeek: number, hourLocal: number) {
+  const zonedNow = toZonedTime(new Date(), timezone);
+  const scheduled = new Date(zonedNow);
+  const dayDelta = (dayOfWeek - zonedNow.getDay() + 7) % 7;
+
+  scheduled.setDate(scheduled.getDate() + dayDelta);
+  scheduled.setHours(hourLocal, 0, 0, 0);
+
+  if (scheduled <= zonedNow) {
+    scheduled.setDate(scheduled.getDate() + 7);
   }
 
   return fromZonedTime(scheduled, timezone);
@@ -47,7 +63,11 @@ export class CampaignService {
         },
         files: true,
         metadataVariants: true,
-        creator: true
+        creator: {
+          include: {
+            learningProfile: true
+          }
+        }
       }
     });
 
@@ -59,7 +79,14 @@ export class CampaignService {
       throw new ValidationError("Asset is not ready for campaign planning.");
     }
 
-    const metadataVariant = asset.metadataVariants.find((variant) => variant.platform === Platform.YOUTUBE);
+    const metadataVariant = [...(asset.metadataVariants as Array<Record<string, any>>)]
+      .filter((variant) => variant.platform === Platform.YOUTUBE)
+      .sort((left, right) => {
+        if (left.isSelected !== right.isSelected) {
+          return left.isSelected ? -1 : 1;
+        }
+        return right.score - left.score;
+      })[0];
     if (!metadataVariant) {
       throw new ValidationError("Metadata variants are missing for campaign planning.");
     }
@@ -75,24 +102,43 @@ export class CampaignService {
 
     const format =
       (asset.files[0]?.durationSeconds ?? 0) <= 60 ? ContentFormat.YOUTUBE_SHORT : ContentFormat.YOUTUBE_VIDEO;
-    const scheduleRecommendation = await this.agents
-      .recommendSchedule({
-        workspaceId: asset.workspaceId,
-        timezone: asset.workspace.timezone,
-        creatorName: asset.creator.name,
-        creatorNiche: asset.creator.niche,
-        assetTitle: asset.title,
-        assetIntelligence:
-          asset.intelligence && typeof asset.intelligence === "object"
-            ? (asset.intelligence as Record<string, unknown>)
-            : null
-      })
-      .catch(() => null);
+    const scheduleRecommendation =
+      typeof metadataVariant?.scheduledDay === "number" && typeof metadataVariant?.scheduledHour === "number"
+        ? {
+            scheduledFor: pickScheduledSlotFromVariant(
+              asset.workspace.timezone,
+              metadataVariant.scheduledDay,
+              metadataVariant.scheduledHour
+            ),
+            rationale:
+              metadataVariant.reasoning ??
+              "Initial distribution run based on saved metadata pipeline scheduling.",
+            provider: metadataVariant.modelVersion,
+            confidence: metadataVariant.score > 0 ? metadataVariant.score : 0.7
+          }
+        : await this.agents
+            .recommendSchedule({
+              workspaceId: asset.workspaceId,
+              timezone: asset.workspace.timezone,
+              creatorName: asset.creator.name,
+              creatorNiche: asset.creator.niche,
+              creatorProfilePack: buildCreatorProfilePack(asset.creator.learningProfile),
+              assetTitle: asset.title,
+              assetIntelligence:
+                asset.intelligence && typeof asset.intelligence === "object"
+                  ? (asset.intelligence as Record<string, unknown>)
+                  : null
+            })
+            .catch(() => null);
     const scheduledFor = scheduleRecommendation?.scheduledFor ?? pickPublishTime(asset.workspace.timezone);
     const scheduleRationale =
-      scheduleRecommendation?.rationale ?? "Initial distribution run based on default creator timing.";
-    const schedulingProvider = scheduleRecommendation?.provider ?? "heuristic";
-    const schedulingConfidence = scheduleRecommendation?.confidence ?? 0.75;
+      scheduleRecommendation?.rationale ??
+      metadataVariant?.reasoning ??
+      "Initial distribution run based on default creator timing.";
+    const schedulingProvider = scheduleRecommendation?.provider ?? metadataVariant?.modelVersion ?? "heuristic";
+    const schedulingConfidence =
+      scheduleRecommendation?.confidence ??
+      (metadataVariant && metadataVariant.score > 0 ? metadataVariant.score : 0.75);
 
     const campaign = await this.prisma.campaign.create({
       data: {

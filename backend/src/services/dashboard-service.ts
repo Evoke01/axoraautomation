@@ -2,6 +2,7 @@ import { type PrismaClient, Platform } from "@prisma/client";
 import { format, startOfDay, subDays } from "date-fns";
 
 import { hasYouTubeAnalyticsScope } from "../adapters/youtube-adapter.js";
+import { summarizeCreatorProfile } from "./learning-service.js";
 import { getFreshnessMinutes } from "../lib/youtube-freshness.js";
 
 export class DashboardService {
@@ -309,10 +310,15 @@ export class DashboardService {
 
   async getIntelligenceOverview(workspaceId: string) {
     const now = new Date();
-    const [youtubeAccount, latestChannelSnapshot, latestTrendWindow, topPosts, competitorChannels, competitorVideos, weeklyReport] =
+    const [youtubeAccount, creator, latestChannelSnapshot, latestTrendWindow, topPosts, competitorChannels, competitorVideos, weeklyReport] =
       await Promise.all([
         this.prisma.connectedAccount.findFirst({
           where: { workspaceId, platform: Platform.YOUTUBE },
+          orderBy: { createdAt: "asc" }
+        }),
+        this.prisma.creator.findFirst({
+          where: { workspaceId },
+          include: { learningProfile: true },
           orderBy: { createdAt: "asc" }
         }),
         this.prisma.youtubeChannelSnapshot.findFirst({
@@ -442,6 +448,7 @@ export class DashboardService {
         channels: competitors,
         opportunities: competitorOpportunities
       },
+      creatorProfile: summarizeCreatorProfile(creator?.learningProfile ?? null),
       weeklyBrief: weeklyReport
         ? {
             generatedAt: weeklyReport.generatedAt,

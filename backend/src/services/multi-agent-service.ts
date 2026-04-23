@@ -1,11 +1,11 @@
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import type { PrismaClient } from "@prisma/client";
-import { z } from "zod";
+import { Platform, type PrismaClient } from "@prisma/client";
 
-import { env } from "../config/env.js";
 import type { AIOrchestrator } from "../ai/orchestrator.js";
+import { env } from "../config/env.js";
+import type { CreatorProfilePack } from "./learning-service.js";
 
-type BaseIntelligence = {
+type VisionInsights = {
   hook: string;
   mainPoint: string;
   vibe: string;
@@ -13,17 +13,9 @@ type BaseIntelligence = {
   summary: string;
 };
 
-type EnrichedIntelligence = BaseIntelligence & {
-  nicheLabel: string;
-  nicheConfidence: number;
-  engagementLabel: string;
-  engagementConfidence: number;
-  trendAngles: string[];
-  providers: string[];
-};
-
 type MetadataVariantDraft = {
   variantKey: string;
+  angle: "curiosity" | "authority" | "controversy";
   title: string;
   hook: string;
   caption: string;
@@ -36,6 +28,24 @@ type MetadataVariantDraft = {
   rationale?: string;
 };
 
+type ClassificationSummary = {
+  niche: string;
+  nicheConfidence: number;
+  engagementLabel: string;
+  engagementConfidence: number;
+  viralScore: number;
+  provider: string;
+};
+
+type CompactSchedule = {
+  dayOfWeek: number;
+  hourLocal: number;
+  minuteLocal: number;
+  confidence: number;
+  rationale: string;
+  provider: string;
+};
+
 type ScheduleRecommendation = {
   scheduledFor: Date;
   rationale: string;
@@ -43,23 +53,35 @@ type ScheduleRecommendation = {
   provider: string;
 };
 
-type WriterContext = {
+type MetadataPipelineContext = {
+  workspaceId: string;
+  timezone: string;
   title: string;
   rawNotes: string | null;
   creatorName: string;
   creatorNiche: string | null;
   creatorBrandVoice: string | null;
+  creatorProfilePack?: CreatorProfilePack | null;
   durationSeconds: number | null;
   intelligence: Record<string, unknown> | null;
 };
 
-type ScheduleContext = {
-  workspaceId: string;
-  timezone: string;
-  creatorName: string;
-  creatorNiche: string | null;
-  assetTitle: string;
-  assetIntelligence: Record<string, unknown> | null;
+type AgentTrace = {
+  agent: string;
+  model: string;
+  latencyMs: number;
+  cached: boolean;
+  success: boolean;
+  error?: string;
+};
+
+export type MetadataPipelineResult = {
+  insights: VisionInsights;
+  variants: MetadataVariantDraft[];
+  classification: ClassificationSummary;
+  schedule: CompactSchedule;
+  processingMs: number;
+  agentTrace: AgentTrace[];
 };
 
 type ClassificationResult = {
@@ -67,331 +89,491 @@ type ClassificationResult = {
   score: number;
 };
 
+const ANGLES: Array<{
+  key: MetadataVariantDraft["angle"];
+  instruction: string;
+}> = [
+  { key: "curiosity", instruction: "Use curiosity gap and unfinished tension." },
+  { key: "authority", instruction: "Lead with expertise, proof, and confidence." },
+  { key: "controversy", instruction: "Use a sharp but safe contrarian take." }
+];
+
+const NICHE_LABELS = [
+  "education",
+  "productivity",
+  "technology",
+  "business",
+  "marketing",
+  "lifestyle",
+  "finance",
+  "self-improvement",
+  "storytelling",
+  "entertainment"
+];
+
+const ENGAGEMENT_LABELS = [
+  "high viral potential",
+  "steady evergreen interest",
+  "niche expert interest",
+  "low immediate pull"
+];
+
 export class MultiAgentService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly orchestrator: AIOrchestrator
   ) {}
 
-  async enrichIntelligence(
-    context: {
-      title: string;
-      rawNotes: string | null;
-      creatorNiche: string | null;
-      baseProvider: "gemini" | "heuristic";
-    },
-    intelligence: BaseIntelligence
-  ): Promise<EnrichedIntelligence> {
-    const baseText = [
+  async generateMetadataPipeline(context: MetadataPipelineContext): Promise<MetadataPipelineResult> {
+    const startedAt = Date.now();
+    const trace: AgentTrace[] = [];
+    const insights = normalizeInsights(context);
+
+    const [rawVariants, classification] = await Promise.all([
+      this.generateAngleVariants(context, insights, trace),
+      this.classifyContent(context, insights, trace)
+    ]);
+
+    const [variants, schedule] = await Promise.all([
+      this.scoreVariants(context, insights, rawVariants, trace),
+      this.recommendCompactSchedule(context, insights, classification, trace)
+    ]);
+
+    return {
+      insights,
+      variants: variants.map((variant) => ({
+        ...variant,
+        modelVersion: variant.modelVersion ?? buildModelVersion(variant.angle)
+      })),
+      classification,
+      schedule,
+      processingMs: Date.now() - startedAt,
+      agentTrace: trace
+    };
+  }
+
+  async recommendSchedule(context: {
+    workspaceId: string;
+    timezone: string;
+    creatorName: string;
+    creatorNiche: string | null;
+    creatorProfilePack?: CreatorProfilePack | null;
+    assetTitle: string;
+    assetIntelligence: Record<string, unknown> | null;
+  }): Promise<ScheduleRecommendation | null> {
+    const compact = await this.recommendCompactSchedule(
+      {
+        workspaceId: context.workspaceId,
+        timezone: context.timezone,
+        title: context.assetTitle,
+        rawNotes: null,
+        creatorName: context.creatorName,
+        creatorNiche: context.creatorNiche,
+        creatorBrandVoice: null,
+        creatorProfilePack: context.creatorProfilePack,
+        durationSeconds: null,
+        intelligence: context.assetIntelligence
+      },
+      normalizeInsights({
+        workspaceId: context.workspaceId,
+        timezone: context.timezone,
+        title: context.assetTitle,
+        rawNotes: null,
+        creatorName: context.creatorName,
+        creatorNiche: context.creatorNiche,
+        creatorBrandVoice: null,
+        creatorProfilePack: context.creatorProfilePack,
+        durationSeconds: null,
+        intelligence: context.assetIntelligence
+      }),
+      {
+        niche: context.creatorNiche ?? "general",
+        nicheConfidence: 0.4,
+        engagementLabel: "steady evergreen interest",
+        engagementConfidence: 0.35,
+        viralScore: 0.45,
+        provider: "heuristic"
+      },
+      []
+    ).catch(() => null);
+
+    if (!compact) {
+      return null;
+    }
+
+    return {
+      scheduledFor: buildScheduledDate(
+        context.timezone,
+        compact.dayOfWeek,
+        compact.hourLocal,
+        compact.minuteLocal
+      ),
+      rationale: compact.rationale,
+      confidence: compact.confidence,
+      provider: compact.provider
+    };
+  }
+
+  private async generateAngleVariants(
+    context: MetadataPipelineContext,
+    insights: VisionInsights,
+    trace: AgentTrace[]
+  ): Promise<MetadataVariantDraft[]> {
+    if (!env.GROQ_API_KEY) {
+      return buildHeuristicVariants(context, insights);
+    }
+
+    return Promise.all(
+      ANGLES.map(async (angle) => {
+        const latencyStartedAt = Date.now();
+
+        try {
+          const response = await fetch(`${env.GROQ_BASE_URL}/chat/completions`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.GROQ_API_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              model: env.GROQ_MODEL,
+              temperature: 0.45,
+              max_tokens: 220,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    'Write YouTube metadata. Return JSON only with keys t,h,c,cta,tb,hs,kw,r. Constraints: title<=68 chars, hook<=90 chars, caption<=160 chars, hashtags=4-6 plain words, keywords=4-6 plain words.'
+                },
+                {
+                  role: "user",
+                  content: JSON.stringify({
+                    a: angle.instruction,
+                    title: clipText(context.title, 80),
+                    notes: clipText(context.rawNotes, 120),
+                    niche: clipText(context.creatorNiche ?? insights.keywords[0] ?? "general", 30),
+                    voice: clipText(context.creatorBrandVoice, 60),
+                    profile: compactProfile(context.creatorProfilePack),
+                    dur: context.durationSeconds ? Math.round(context.durationSeconds) : null,
+                    hook: clipText(insights.hook, 120),
+                    point: clipText(insights.mainPoint, 120),
+                    vibe: clipText(insights.vibe, 24),
+                    summary: clipText(insights.summary, 120),
+                    kw: insights.keywords.slice(0, 5)
+                  })
+                }
+              ]
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Groq ${response.status}`);
+          }
+
+          const payload = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          const parsed = safeJsonParse(payload.choices?.[0]?.message?.content ?? "{}");
+          const variant = normalizeAngleVariant(parsed, angle.key, context, insights);
+
+          trace.push({
+            agent: `writer:${angle.key}`,
+            model: env.GROQ_MODEL,
+            latencyMs: Date.now() - latencyStartedAt,
+            cached: false,
+            success: true
+          });
+
+          return variant;
+        } catch (error) {
+          trace.push({
+            agent: `writer:${angle.key}`,
+            model: env.GROQ_MODEL,
+            latencyMs: Date.now() - latencyStartedAt,
+            cached: false,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+
+          return buildSingleHeuristicVariant(angle.key, context, insights);
+        }
+      })
+    );
+  }
+
+  private async classifyContent(
+    context: MetadataPipelineContext,
+    insights: VisionInsights,
+    trace: AgentTrace[]
+  ): Promise<ClassificationSummary> {
+    const startedAt = Date.now();
+    const sourceText = [
       context.title,
-      context.rawNotes ?? "",
-      intelligence.hook,
-      intelligence.mainPoint,
-      intelligence.vibe,
-      intelligence.summary,
-      intelligence.keywords.join(" ")
+      clipText(context.rawNotes, 100),
+      clipText(insights.hook, 100),
+      clipText(insights.summary, 120),
+      insights.keywords.slice(0, 6).join(" ")
     ]
       .filter(Boolean)
-      .join("\n");
+      .join(" | ");
 
-    const nicheLabels = [
-      "education",
-      "productivity",
-      "technology",
-      "business",
-      "marketing",
-      "lifestyle",
-      "finance",
-      "self-improvement",
-      "storytelling",
-      "entertainment"
-    ];
-    const engagementLabels = [
-      "high viral potential",
-      "steady evergreen interest",
-      "niche expert interest",
-      "low immediate pull"
-    ];
+    if (!env.HF_API_TOKEN) {
+      const heuristic = heuristicClassification(context, insights);
+      trace.push({
+        agent: "classifier",
+        model: "heuristic",
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: true
+      });
+      return heuristic;
+    }
 
     try {
       const [nicheScores, engagementScores] = await Promise.all([
-        this.zeroShotClassify(baseText, nicheLabels),
-        this.zeroShotClassify(baseText, engagementLabels)
+        this.zeroShotClassify(sourceText, NICHE_LABELS),
+        this.zeroShotClassify(sourceText, ENGAGEMENT_LABELS)
       ]);
 
       const nicheTop = nicheScores[0];
       const engagementTop = engagementScores[0];
-
-      return {
-        ...intelligence,
-        nicheLabel: nicheTop?.label ?? context.creatorNiche ?? "general",
+      const result: ClassificationSummary = {
+        niche: nicheTop?.label ?? context.creatorNiche ?? insights.keywords[0] ?? "general",
         nicheConfidence: nicheTop?.score ?? 0.4,
-        engagementLabel: engagementTop?.label ?? this.heuristicEngagementLabel(intelligence.vibe),
+        engagementLabel: engagementTop?.label ?? heuristicEngagementLabel(insights.vibe),
         engagementConfidence: engagementTop?.score ?? 0.35,
-        trendAngles: nicheScores.slice(0, 3).map((entry) => entry.label),
-        providers: [context.baseProvider, nicheTop || engagementTop ? "huggingface" : "heuristic"]
+        viralScore: deriveViralScore(engagementTop?.label, engagementTop?.score),
+        provider: `huggingface:${env.HF_ZERO_SHOT_MODEL}`
       };
-    } catch {
-      return {
-        ...intelligence,
-        nicheLabel: context.creatorNiche ?? intelligence.keywords[0] ?? "general",
-        nicheConfidence: 0.35,
-        engagementLabel: this.heuristicEngagementLabel(intelligence.vibe),
-        engagementConfidence: 0.3,
-        trendAngles: intelligence.keywords.slice(0, 3),
-        providers: [context.baseProvider, "heuristic"]
-      };
-    }
-  }
 
-  async generateMetadataVariants(context: WriterContext): Promise<MetadataVariantDraft[] | null> {
-    const variants = await this.generateWriterVariants(context);
-    if (!variants || variants.length === 0) {
-      return null;
-    }
-
-    const optimized = await this.optimizeVariants(context, variants);
-    const optimizerSuffix = optimized.usedOptimizer ? "+mistral" : "";
-
-    return optimized.variants.map((variant) => ({
-      ...variant,
-      modelVersion: `orchestrator:cascade${optimizerSuffix}`
-    }));
-  }
-
-  async recommendSchedule(context: ScheduleContext): Promise<ScheduleRecommendation | null> {
-    if (!env.COHERE_API_KEY) {
-      return null;
-    }
-
-    const recentPosts = await this.prisma.platformPost.findMany({
-      where: {
-        workspaceId: context.workspaceId,
-        platform: "YOUTUBE",
-        publishedAt: {
-          not: null
-        }
-      },
-      include: {
-        snapshots: {
-          orderBy: { capturedAt: "desc" },
-          take: 1
-        }
-      },
-      orderBy: { publishedAt: "desc" },
-      take: 12
-    });
-
-    const analyticsSummary = recentPosts.map((post) => ({
-      publishedAt: post.publishedAt?.toISOString() ?? null,
-      views: post.snapshots[0]?.views ?? 0,
-      likes: post.snapshots[0]?.likes ?? 0
-    }));
-
-    const response = await fetch(env.COHERE_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.COHERE_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: env.COHERE_MODEL,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are Axora Scheduler. Return only JSON with keys dayOffset, hourLocal, minuteLocal, confidence, rationale. Pick the best local publish slot for a YouTube post."
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              timezone: context.timezone,
-              creatorName: context.creatorName,
-              creatorNiche: context.creatorNiche ?? "general",
-              assetTitle: context.assetTitle,
-              intelligence: context.assetIntelligence,
-              recentPosts: analyticsSummary
-            })
-          }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Cohere scheduling failed with status ${response.status}.`);
-    }
-
-    const payload = (await response.json()) as {
-      message?: { content?: Array<{ text?: string }> };
-    };
-    const content = payload.message?.content?.[0]?.text ?? "{}";
-    const parsed = safeJsonParse(content);
-
-    if (!parsed) {
-      return null;
-    }
-
-    const dayOffset = clampNumber(parsed.dayOffset, 0, 6, 1);
-    const hourLocal = clampNumber(parsed.hourLocal, 0, 23, 18);
-    const minuteLocal = normalizeMinute(parsed.minuteLocal);
-    const confidence = clampNumber(parsed.confidence, 0, 1, 0.55);
-
-    const zonedNow = toZonedTime(new Date(), context.timezone);
-    const localSlot = new Date(zonedNow);
-    localSlot.setDate(localSlot.getDate() + dayOffset);
-    localSlot.setHours(hourLocal, minuteLocal, 0, 0);
-
-    if (localSlot <= zonedNow) {
-      localSlot.setDate(localSlot.getDate() + 1);
-    }
-
-    return {
-      scheduledFor: fromZonedTime(localSlot, context.timezone),
-      rationale:
-        typeof parsed.rationale === "string" && parsed.rationale.length > 0
-          ? parsed.rationale
-          : "Scheduled from Cohere timing recommendation.",
-      confidence,
-      provider: `cohere:${env.COHERE_MODEL}`
-    };
-  }
-
-  private async generateWriterVariants(context: WriterContext): Promise<MetadataVariantDraft[] | null> {
-    if (!this.orchestrator.isAvailable) {
-      return null;
-    }
-
-    const promptContent = JSON.stringify({
-      creatorName: context.creatorName,
-      creatorNiche: context.creatorNiche ?? "general",
-      creatorBrandVoice: context.creatorBrandVoice ?? "direct and energetic",
-      assetTitle: context.title,
-      rawNotes: context.rawNotes ?? "",
-      durationSeconds: context.durationSeconds,
-      intelligence: context.intelligence
-    });
-
-    const variantSchema = z.object({
-      variants: z.array(z.object({
-        variantKey: z.string(),
-        title: z.string(),
-        hook: z.string(),
-        caption: z.string(),
-        cta: z.string(),
-        thumbnailBrief: z.string(),
-        hashtags: z.array(z.string()),
-        keywords: z.array(z.string())
-      })).length(3)
-    });
-
-    try {
-      const result = await this.orchestrator.complete({
-        prompt: [
-          {
-            role: "system",
-            content: "You are Axora Writer. Return one JSON object with a `variants` array of exactly 3 metadata variants. Each variant must include variantKey, title, hook, caption, cta, thumbnailBrief, hashtags, keywords. Keep titles under 70 chars, captions compact, hashtags 3-5 entries, keywords 4-8 entries."
-          },
-          {
-            role: "user",
-            content: promptContent
-          }
-        ],
-        schema: variantSchema,
-        temperature: 0.8,
-        maxTokens: 2048
+      trace.push({
+        agent: "classifier",
+        model: env.HF_ZERO_SHOT_MODEL,
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: true
       });
 
-      const rawVariants = result.content.variants ?? [];
-      return rawVariants
-        .map((entry, index) => normalizeVariant(entry, index))
-        .filter((entry): entry is MetadataVariantDraft => Boolean(entry));
-    } catch {
-      return null;
+      return result;
+    } catch (error) {
+      trace.push({
+        agent: "classifier",
+        model: env.HF_ZERO_SHOT_MODEL,
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      return heuristicClassification(context, insights);
     }
   }
 
-  private async optimizeVariants(
-    context: WriterContext,
-    variants: MetadataVariantDraft[]
-  ): Promise<{ variants: MetadataVariantDraft[]; usedOptimizer: boolean }> {
+  private async scoreVariants(
+    context: MetadataPipelineContext,
+    insights: VisionInsights,
+    variants: MetadataVariantDraft[],
+    trace: AgentTrace[]
+  ): Promise<MetadataVariantDraft[]> {
+    const startedAt = Date.now();
+
     if (!env.MISTRAL_API_KEY) {
-      return { variants, usedOptimizer: false };
+      const scored = heuristicScoreVariants(variants, insights);
+      trace.push({
+        agent: "optimizer",
+        model: "heuristic",
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: true
+      });
+      return scored;
     }
 
-    const response = await fetch(env.MISTRAL_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.MISTRAL_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: env.MISTRAL_MODEL,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are Axora Optimizer. Score each variant for CTR and retention. Return JSON with `selectedVariantKey` and `scores` where each score item has variantKey, score (0-1), rationale."
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              creatorNiche: context.creatorNiche ?? "general",
-              durationSeconds: context.durationSeconds,
-              intelligence: context.intelligence,
-              variants
-            })
+    try {
+      const response = await fetch(env.MISTRAL_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.MISTRAL_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: env.MISTRAL_MODEL,
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                'Score 3 YouTube variants. Return JSON only: {"w":"variantKey","s":{"key":0.0},"r":{"key":"short reason"}}.'
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                niche: context.creatorNiche ?? insights.keywords[0] ?? "general",
+                vibe: clipText(insights.vibe, 24),
+                dur: context.durationSeconds ? Math.round(context.durationSeconds) : null,
+                profile: compactProfile(context.creatorProfilePack),
+                v: variants.map((variant) => ({
+                  k: variant.variantKey,
+                  t: clipText(variant.title, 68),
+                  h: clipText(variant.hook, 90),
+                  c: clipText(variant.caption, 100)
+                }))
+              })
+            }
+          ],
+          max_tokens: 120
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Mistral ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const parsed = safeJsonParse(payload.choices?.[0]?.message?.content ?? "{}");
+      const scores = parsed?.s && typeof parsed.s === "object" ? (parsed.s as Record<string, unknown>) : {};
+      const reasons = parsed?.r && typeof parsed.r === "object" ? (parsed.r as Record<string, unknown>) : {};
+      const winner = typeof parsed?.w === "string" ? parsed.w : undefined;
+
+      const scored = variants
+        .map((variant) => ({
+          ...variant,
+          score: clampScore(scores[variant.variantKey]),
+          rationale:
+            typeof reasons[variant.variantKey] === "string"
+              ? clipText(reasons[variant.variantKey] as string, 80)
+              : variant.rationale
+        }))
+        .sort((left, right) => {
+          if (winner) {
+            if (left.variantKey === winner) return -1;
+            if (right.variantKey === winner) return 1;
           }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      return { variants, usedOptimizer: false };
-    }
-
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = payload.choices?.[0]?.message?.content ?? "{}";
-    const parsed = safeJsonParse(content);
-    const scoreEntries = Array.isArray(parsed?.scores) ? parsed.scores : [];
-    const selectedVariantKey =
-      typeof parsed?.selectedVariantKey === "string" ? parsed.selectedVariantKey : undefined;
-
-    const scoreMap = new Map<string, { score?: number; rationale?: string }>();
-    for (const entry of scoreEntries) {
-      if (entry && typeof entry === "object" && typeof entry.variantKey === "string") {
-        scoreMap.set(entry.variantKey, {
-          score: typeof entry.score === "number" ? entry.score : undefined,
-          rationale: typeof entry.rationale === "string" ? entry.rationale : undefined
+          return (right.score ?? 0) - (left.score ?? 0);
         });
-      }
+
+      trace.push({
+        agent: "optimizer",
+        model: env.MISTRAL_MODEL,
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: true
+      });
+
+      return scored;
+    } catch (error) {
+      trace.push({
+        agent: "optimizer",
+        model: env.MISTRAL_MODEL,
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      return heuristicScoreVariants(variants, insights);
     }
-
-    const enriched = variants.map((variant) => ({
-      ...variant,
-      score: scoreMap.get(variant.variantKey)?.score,
-      rationale: scoreMap.get(variant.variantKey)?.rationale
-    }));
-
-    const sorted = [...enriched].sort((left, right) => {
-      if (selectedVariantKey) {
-        if (left.variantKey === selectedVariantKey) return -1;
-        if (right.variantKey === selectedVariantKey) return 1;
-      }
-
-      return (right.score ?? 0) - (left.score ?? 0);
-    });
-
-    return { variants: sorted, usedOptimizer: true };
   }
 
-  private async zeroShotClassify(
-    input: string,
-    labels: string[]
-  ): Promise<ClassificationResult[]> {
+  private async recommendCompactSchedule(
+    context: MetadataPipelineContext,
+    insights: VisionInsights,
+    classification: ClassificationSummary,
+    trace: AgentTrace[]
+  ): Promise<CompactSchedule> {
+    const startedAt = Date.now();
+    const analytics = await this.loadAnalyticsSummary(context.workspaceId, context.timezone);
+
+    if (!env.COHERE_API_KEY) {
+      const heuristic = heuristicSchedule(context.timezone, analytics, context.creatorProfilePack);
+      trace.push({
+        agent: "scheduler",
+        model: "heuristic",
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: true
+      });
+      return heuristic;
+    }
+
+    try {
+      const response = await fetch(env.COHERE_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.COHERE_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: env.COHERE_MODEL,
+          messages: [
+            {
+              role: "system",
+              content:
+                'Pick one best local YouTube posting slot. Return JSON only with keys d,h,m,c,r where d=0..6 h=0..23 m in [0,15,30,45].'
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                tz: context.timezone,
+                niche: classification.niche,
+                viral: Number(classification.viralScore.toFixed(2)),
+                vibe: clipText(insights.vibe, 24),
+                dur: context.durationSeconds ? Math.round(context.durationSeconds) : null,
+                profile: compactProfile(context.creatorProfilePack),
+                days: analytics.topDays,
+                hours: analytics.topHours
+              })
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cohere ${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        message?: { content?: Array<{ text?: string }> };
+      };
+      const parsed = safeJsonParse(payload.message?.content?.[0]?.text ?? "{}");
+      const recommendation: CompactSchedule = {
+        dayOfWeek: clampInteger(parsed?.d, 0, 6, analytics.topDays[0]?.day ?? 2),
+        hourLocal: clampInteger(parsed?.h, 0, 23, analytics.topHours[0]?.hour ?? 18),
+        minuteLocal: normalizeMinute(parsed?.m),
+        confidence: clampScore(parsed?.c),
+        rationale:
+          typeof parsed?.r === "string" && parsed.r.length > 0
+            ? clipText(parsed.r, 120)
+            : "Scheduled from compact Cohere timing recommendation.",
+        provider: `cohere:${env.COHERE_MODEL}`
+      };
+
+      trace.push({
+        agent: "scheduler",
+        model: env.COHERE_MODEL,
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: true
+      });
+
+      return recommendation;
+    } catch (error) {
+      trace.push({
+        agent: "scheduler",
+        model: env.COHERE_MODEL,
+        latencyMs: Date.now() - startedAt,
+        cached: false,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      return heuristicSchedule(context.timezone, analytics, context.creatorProfilePack);
+    }
+  }
+
+  private async zeroShotClassify(input: string, labels: string[]): Promise<ClassificationResult[]> {
     if (!env.HF_API_TOKEN) {
       return [];
     }
@@ -444,90 +626,429 @@ export class MultiAgentService {
     return [];
   }
 
-  private heuristicEngagementLabel(vibe: string) {
-    const normalized = vibe.toLowerCase();
-    if (normalized.includes("high") || normalized.includes("provoc") || normalized.includes("energetic")) {
-      return "high viral potential";
+  private async loadAnalyticsSummary(workspaceId: string, timezone: string) {
+    const posts = await this.prisma.platformPost.findMany({
+      where: {
+        workspaceId,
+        platform: Platform.YOUTUBE,
+        status: "PUBLISHED",
+        publishedAt: { not: null }
+      },
+      select: {
+        publishedAt: true,
+        metrics: true
+      },
+      orderBy: { publishedAt: "desc" },
+      take: 24
+    });
+
+    const dayBuckets = Array.from({ length: 7 }, (_, day) => ({
+      day,
+      totalViews: 0,
+      count: 0
+    }));
+    const hourBuckets = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      totalViews: 0,
+      count: 0
+    }));
+
+    for (const post of posts) {
+      if (!post.publishedAt) {
+        continue;
+      }
+
+      const localDate = toZonedTime(post.publishedAt, timezone);
+      const views = getMetricValue(post.metrics, "views") || 1;
+      const day = localDate.getDay();
+      const hour = localDate.getHours();
+
+      dayBuckets[day]!.totalViews += views;
+      dayBuckets[day]!.count += 1;
+      hourBuckets[hour]!.totalViews += views;
+      hourBuckets[hour]!.count += 1;
     }
 
-    if (normalized.includes("education") || normalized.includes("chill")) {
-      return "steady evergreen interest";
-    }
+    const topDays = dayBuckets
+      .map((bucket) => ({
+        day: bucket.day,
+        avgViews: bucket.count > 0 ? Math.round(bucket.totalViews / bucket.count) : 0
+      }))
+      .sort((left, right) => right.avgViews - left.avgViews)
+      .slice(0, 3);
 
-    return "niche expert interest";
+    const topHours = hourBuckets
+      .map((bucket) => ({
+        hour: bucket.hour,
+        avgViews: bucket.count > 0 ? Math.round(bucket.totalViews / bucket.count) : 0
+      }))
+      .sort((left, right) => right.avgViews - left.avgViews)
+      .slice(0, 5);
+
+    return {
+      topDays,
+      topHours
+    };
   }
-
 }
 
-function normalizeVariant(entry: unknown, index: number): MetadataVariantDraft | null {
-  if (!entry || typeof entry !== "object") {
-    return null;
-  }
-
-  const candidate = entry as Record<string, unknown>;
-  const fallbackKey = ["primary", "curiosity", "direct"][index] ?? `variant_${index + 1}`;
+function normalizeInsights(context: MetadataPipelineContext): VisionInsights {
+  const intelligence = context.intelligence ?? {};
+  const keywords = normalizeStringArray(readValue(intelligence, "keywords"), 6);
 
   return {
-    variantKey:
-      typeof candidate.variantKey === "string" && candidate.variantKey.length > 0
-        ? candidate.variantKey
-        : fallbackKey,
-    title: truncateText(asString(candidate.title, "Untitled asset"), 70),
-    hook: truncateText(asString(candidate.hook, ""), 140),
-    caption: truncateText(asString(candidate.caption, ""), 220),
-    cta: truncateText(asString(candidate.cta, ""), 80),
-    thumbnailBrief: truncateText(asString(candidate.thumbnailBrief, ""), 180),
-    hashtags: normalizeStringArray(candidate.hashtags, 5, "#"),
-    keywords: normalizeStringArray(candidate.keywords, 8)
+    hook: clipText(
+      readString(intelligence, "hook") ??
+        context.title,
+      120
+    ),
+    mainPoint: clipText(
+      readString(intelligence, "mainPoint") ??
+        clipText(context.rawNotes, 140) ??
+        context.title,
+      140
+    ),
+    vibe: clipText(
+      readString(intelligence, "vibe") ??
+        inferVibe(context.rawNotes ?? context.title),
+      30
+    ),
+    keywords:
+      keywords.length > 0
+        ? keywords
+        : fallbackKeywords(context.title, context.rawNotes, context.creatorNiche),
+    summary: clipText(
+      readString(intelligence, "summary") ??
+        [context.title, context.rawNotes ?? ""].filter(Boolean).join(". "),
+      160
+    )
   };
 }
 
-function normalizeStringArray(
-  value: unknown,
-  limit: number,
-  prefix = ""
+function buildHeuristicVariants(
+  context: MetadataPipelineContext,
+  insights: VisionInsights
+): MetadataVariantDraft[] {
+  return ANGLES.map((angle) => buildSingleHeuristicVariant(angle.key, context, insights));
+}
+
+function buildSingleHeuristicVariant(
+  angle: MetadataVariantDraft["angle"],
+  context: MetadataPipelineContext,
+  insights: VisionInsights
+): MetadataVariantDraft {
+  const primaryKeyword = insights.keywords[0] ?? "growth";
+  const secondaryKeyword = insights.keywords[1] ?? "strategy";
+  const baseTitle =
+    angle === "curiosity"
+      ? `Why ${titleCase(primaryKeyword)} is shifting now`
+      : angle === "authority"
+        ? `${titleCase(primaryKeyword)} playbook that actually works`
+        : `The ${titleCase(primaryKeyword)} advice most people get wrong`;
+
+  return {
+    variantKey: angle,
+    angle,
+    title: clipText(baseTitle, 68),
+    hook:
+      angle === "curiosity"
+        ? `The ${secondaryKeyword} detail most creators miss.`
+        : angle === "authority"
+          ? `Here is the ${primaryKeyword} framework I would use again.`
+          : `Most people are overcomplicating ${primaryKeyword}.`,
+    caption: clipText(
+      `${context.title}. ${insights.summary} Built for YouTube with a ${angle} angle.`,
+      160
+    ),
+    cta:
+      angle === "authority"
+        ? "Save this for the next upload."
+        : angle === "controversy"
+          ? "Comment if you disagree."
+          : "Watch to the end for the full breakdown.",
+    thumbnailBrief:
+      angle === "controversy"
+        ? "Bold statement, high contrast, one disputed claim."
+        : angle === "authority"
+          ? "Clean expert framing with one proof point."
+          : "Curiosity-led text with one unresolved promise.",
+    hashtags: insights.keywords.slice(0, 5),
+    keywords: insights.keywords.slice(0, 6),
+    rationale: `Heuristic ${angle} variant.`,
+    modelVersion: buildModelVersion(angle)
+  };
+}
+
+function normalizeAngleVariant(
+  parsed: Record<string, unknown> | null,
+  angle: MetadataVariantDraft["angle"],
+  context: MetadataPipelineContext,
+  insights: VisionInsights
+): MetadataVariantDraft {
+  const fallback = buildSingleHeuristicVariant(angle, context, insights);
+
+  return {
+    variantKey: angle,
+    angle,
+    title: clipText(readString(parsed, "t") ?? fallback.title, 68),
+    hook: clipText(readString(parsed, "h") ?? fallback.hook, 90),
+    caption: clipText(readString(parsed, "c") ?? fallback.caption, 160),
+    cta: clipText(readString(parsed, "cta") ?? fallback.cta, 80),
+    thumbnailBrief: clipText(readString(parsed, "tb") ?? fallback.thumbnailBrief, 140),
+    hashtags: normalizeStringArray(readValue(parsed, "hs"), 6),
+    keywords: normalizeStringArray(readValue(parsed, "kw"), 6),
+    rationale: clipText(readString(parsed, "r") ?? fallback.rationale ?? "", 80),
+    modelVersion: buildModelVersion(angle)
+  };
+}
+
+function heuristicClassification(
+  context: MetadataPipelineContext,
+  insights: VisionInsights
+): ClassificationSummary {
+  return {
+    niche: context.creatorNiche ?? insights.keywords[0] ?? "general",
+    nicheConfidence: 0.35,
+    engagementLabel: heuristicEngagementLabel(insights.vibe),
+    engagementConfidence: 0.3,
+    viralScore: deriveViralScore(heuristicEngagementLabel(insights.vibe), 0.3),
+    provider: "heuristic"
+  };
+}
+
+function heuristicEngagementLabel(vibe: string) {
+  const normalized = vibe.toLowerCase();
+  if (normalized.includes("high") || normalized.includes("provoc") || normalized.includes("energetic")) {
+    return "high viral potential";
+  }
+  if (normalized.includes("educat") || normalized.includes("tutorial") || normalized.includes("calm")) {
+    return "steady evergreen interest";
+  }
+  return "niche expert interest";
+}
+
+function heuristicScoreVariants(variants: MetadataVariantDraft[], insights: VisionInsights) {
+  return [...variants]
+    .map((variant) => {
+      const keywordHits = variant.keywords.filter((keyword) => insights.keywords.includes(keyword)).length;
+      const titlePenalty = variant.title.length > 62 ? 0.04 : 0;
+      const hookBonus = variant.hook.includes("?") ? 0.06 : 0;
+      const angleBonus =
+        variant.angle === "curiosity" ? 0.03 : variant.angle === "authority" ? 0.02 : 0.01;
+      const score = Math.max(0.35, Math.min(0.92, 0.45 + keywordHits * 0.05 + hookBonus + angleBonus - titlePenalty));
+
+      return {
+        ...variant,
+        score: Number(score.toFixed(2)),
+        rationale: variant.rationale ?? "Heuristic ranking."
+      };
+    })
+    .sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+}
+
+function heuristicSchedule(
+  timezone: string,
+  analytics: {
+    topDays: Array<{ day: number; avgViews: number }>;
+    topHours: Array<{ hour: number; avgViews: number }>;
+  },
+  profile?: CreatorProfilePack | null
+): CompactSchedule {
+  const preferredWindow = profile?.bestPublishWindows[0] ? parsePublishWindow(profile.bestPublishWindows[0]) : null;
+  return {
+    dayOfWeek: preferredWindow?.dayOfWeek ?? analytics.topDays[0]?.day ?? 2,
+    hourLocal: preferredWindow?.hourLocal ?? analytics.topHours[0]?.hour ?? 18,
+    minuteLocal: 0,
+    confidence: 0.52,
+    rationale: `Scheduled from historical ${timezone} winners.`,
+    provider: "heuristic"
+  };
+}
+
+function buildScheduledDate(
+  timezone: string,
+  dayOfWeek: number,
+  hourLocal: number,
+  minuteLocal: number
 ) {
+  const now = new Date();
+  const zonedNow = toZonedTime(now, timezone);
+  const candidate = new Date(zonedNow);
+  const dayDelta = (dayOfWeek - zonedNow.getDay() + 7) % 7;
+
+  candidate.setDate(candidate.getDate() + dayDelta);
+  candidate.setHours(hourLocal, minuteLocal, 0, 0);
+
+  if (candidate <= zonedNow) {
+    candidate.setDate(candidate.getDate() + 7);
+  }
+
+  return fromZonedTime(candidate, timezone);
+}
+
+function deriveViralScore(label: string | undefined, confidence: number | undefined) {
+  const safeConfidence = typeof confidence === "number" ? confidence : 0.35;
+  if (label === "high viral potential") {
+    return Number(Math.min(0.95, 0.62 + safeConfidence * 0.3).toFixed(2));
+  }
+  if (label === "steady evergreen interest") {
+    return Number(Math.min(0.78, 0.42 + safeConfidence * 0.22).toFixed(2));
+  }
+  if (label === "low immediate pull") {
+    return Number(Math.max(0.18, 0.16 + safeConfidence * 0.15).toFixed(2));
+  }
+  return Number(Math.min(0.68, 0.3 + safeConfidence * 0.2).toFixed(2));
+}
+
+function fallbackKeywords(...parts: Array<string | null | undefined>) {
+  const tokens = parts
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .flatMap((value) =>
+      value
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((token) => token.length > 3)
+    );
+
+  return [...new Set(tokens)].slice(0, 6);
+}
+
+function inferVibe(text: string) {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("tutorial") || normalized.includes("how to") || normalized.includes("breakdown")) {
+    return "educational";
+  }
+  if (normalized.includes("story") || normalized.includes("behind")) {
+    return "storytelling";
+  }
+  if (normalized.includes("controvers") || normalized.includes("hot take")) {
+    return "provocative";
+  }
+  return "high-energy";
+}
+
+function getMetricValue(metrics: unknown, key: "views" | "likes" | "comments") {
+  if (!metrics || typeof metrics !== "object") return 0;
+  const value = (metrics as Record<string, unknown>)[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function normalizeStringArray(value: unknown, limit: number) {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
     .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-    .map((entry) => `${prefix}${entry.replace(/^#/, "").trim()}`)
+    .map((entry) => entry.replace(/^#/, "").trim().toLowerCase())
     .slice(0, limit);
 }
 
-function asString(value: unknown, fallback: string) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+function readValue(record: Record<string, unknown> | null | undefined, key: string) {
+  return record && typeof record === "object" ? record[key] : undefined;
 }
 
-function truncateText(value: string, maxLength: number) {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3).trim()}...`;
+function readString(record: Record<string, unknown> | null | undefined, key: string) {
+  const value = readValue(record, key);
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function clipText(value: string | null | undefined, maxLength: number) {
+  if (!value) {
+    return "";
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return normalized.slice(0, maxLength - 1).trim();
+}
+
+function clampInteger(value: unknown, min: number, max: number, fallback: number) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function clampScore(value: unknown) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0.5;
+  }
+  return Number(Math.min(1, Math.max(0, value)).toFixed(2));
+}
+
+function normalizeMinute(value: unknown) {
+  const minute = clampInteger(value, 0, 59, 0);
+  const allowed = [0, 15, 30, 45];
+  return allowed.reduce((closest, current) =>
+    Math.abs(current - minute) < Math.abs(closest - minute) ? current : closest
+  );
+}
+
+function buildModelVersion(angle: MetadataVariantDraft["angle"]) {
+  return `gemini-groq-hf-mistral-cohere:${angle}`;
+}
+
+function compactProfile(profile: CreatorProfilePack | null | undefined) {
+  if (!profile) {
+    return null;
+  }
+
+  const compact = {
+    tw: profile.bestTitlePatterns.slice(0, 3),
+    ta: profile.avoidTitlePatterns.slice(0, 2),
+    kw: profile.bestKeywords.slice(0, 3),
+    th: profile.bestThumbnailStyles.slice(0, 2),
+    win: profile.bestPublishWindows.slice(0, 3),
+    ang: profile.bestAngles.slice(0, 2)
+  };
+
+  return Object.values(compact).some((value) => value.length > 0) ? compact : null;
 }
 
 function safeJsonParse(value: string) {
   const cleaned = value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
   try {
-    return JSON.parse(cleaned) as Record<string, any>;
+    return JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
     return null;
   }
 }
 
-function clampNumber(value: unknown, min: number, max: number, fallback: number) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return fallback;
-  }
-
-  return Math.min(max, Math.max(min, value));
+function titleCase(value: string) {
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .map((token) => token[0]?.toUpperCase() + token.slice(1))
+    .join(" ");
 }
 
-function normalizeMinute(value: unknown) {
-  const minute = clampNumber(value, 0, 59, 0);
-  const allowed = [0, 15, 30, 45];
+function parsePublishWindow(value: string) {
+  const [day, bucket] = value.split("_");
+  const dayMap: Record<string, number> = {
+    sun: 0,
+    mon: 1,
+    tue: 2,
+    wed: 3,
+    thu: 4,
+    fri: 5,
+    sat: 6
+  };
+  const bucketMap: Record<string, number> = {
+    morning: 9,
+    afternoon: 14,
+    evening: 18,
+    night: 21
+  };
 
-  return allowed.reduce((closest, current) =>
-    Math.abs(current - minute) < Math.abs(closest - minute) ? current : closest
-  );
+  if (!day || !bucket || !(day in dayMap) || !(bucket in bucketMap)) {
+    return null;
+  }
+
+  return {
+    dayOfWeek: dayMap[day],
+    hourLocal: bucketMap[bucket]
+  };
 }

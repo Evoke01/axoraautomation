@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 
 import { eachDayOfInterval, subDays } from "date-fns";
 import { google, type youtube_v3 } from "googleapis";
-import { ConnectedAccountStatus, Platform, PostStatus, type PrismaClient } from "@prisma/client";
+import {
+  ConnectedAccountStatus,
+  Platform,
+  PostStatus,
+  type PerformanceCheckpointKey,
+  type PrismaClient
+} from "@prisma/client";
 
 import { env } from "../config/env.js";
 import { decryptValue, encryptValue } from "../lib/crypto.js";
@@ -60,6 +66,16 @@ export type YouTubeChannelAnalyticsPoint = {
   likes: number;
   comments: number;
   watchTimeMinutes: number;
+};
+
+export type YouTubeLearningMetrics = {
+  views: number;
+  impressions: number;
+  ctr: number;
+  estimatedMinutesWatched: number;
+  averageViewDuration: number;
+  averageViewPercentage: number;
+  rawMetrics: Record<string, unknown>;
 };
 
 export class YouTubeAdapter {
@@ -698,6 +714,80 @@ export class YouTubeAdapter {
     return hasYouTubeAnalyticsScope(account.scopes);
   }
 
+  async getVideoLearningMetrics(
+    accountId: string,
+    externalVideoId: string,
+    checkpointKey: PerformanceCheckpointKey
+  ): Promise<YouTubeLearningMetrics | null> {
+    const post = await this.prisma.platformPost.findFirst({
+      where: {
+        connectedAccountId: accountId,
+        platform: Platform.YOUTUBE,
+        externalPostId: externalVideoId,
+        publishedAt: { not: null }
+      },
+      orderBy: { publishedAt: "desc" }
+    });
+
+    if (!post?.publishedAt) {
+      return null;
+    }
+
+    if (this.shouldUseMock()) {
+      return buildMockLearningMetrics(checkpointKey);
+    }
+
+    await this.assertAnalyticsScope(accountId);
+    const client = await this.ensureFresh(accountId, 30);
+    const youtubeAnalytics = google.youtubeAnalytics({ version: "v2", auth: client });
+    const targetAt = new Date(
+      post.publishedAt.getTime() +
+        (
+          checkpointKey === "H24"
+            ? 24
+            : checkpointKey === "H72"
+              ? 72
+              : checkpointKey === "D7"
+                ? 24 * 7
+                : 24 * 30
+        ) *
+          60 *
+          60 *
+          1000
+    );
+
+    const response = await youtubeAnalytics.reports.query({
+      ids: "channel==MINE",
+      startDate: formatDate(post.publishedAt),
+      endDate: formatDate(targetAt > new Date() ? new Date() : targetAt),
+      metrics:
+        "views,videoThumbnailImpressions,videoThumbnailImpressionsClickRate,estimatedMinutesWatched,averageViewDuration,averageViewPercentage",
+      filters: `video==${externalVideoId}`
+    });
+
+    const headers = response.data.columnHeaders?.map((header) => header.name ?? "") ?? [];
+    const row = response.data.rows?.[0];
+    if (!row) {
+      return null;
+    }
+
+    const record = new Map(headers.map((header, index) => [header, row[index]] as const));
+    return {
+      views: toNumber(record.get("views")),
+      impressions: toNumber(record.get("videoThumbnailImpressions")),
+      ctr: toNumber(record.get("videoThumbnailImpressionsClickRate")),
+      estimatedMinutesWatched: toNumber(record.get("estimatedMinutesWatched")),
+      averageViewDuration: toNumber(record.get("averageViewDuration")),
+      averageViewPercentage: toNumber(record.get("averageViewPercentage")),
+      rawMetrics: {
+        checkpointKey,
+        externalVideoId,
+        headers,
+        row
+      }
+    };
+  }
+
   private async assertAnalyticsScope(accountId: string) {
     const account = await this.prisma.connectedAccount.findUnique({
       where: { id: accountId }
@@ -811,6 +901,28 @@ function createMockPublicVideos(externalChannelId: string, maxResults: number): 
       rawPayload: { mock: true, index }
     };
   });
+}
+
+function buildMockLearningMetrics(checkpointKey: PerformanceCheckpointKey): YouTubeLearningMetrics {
+  const multiplier =
+    checkpointKey === "H24" ? 1 : checkpointKey === "H72" ? 1.5 : checkpointKey === "D7" ? 2.4 : 3.8;
+
+  return {
+    views: Math.round(1400 * multiplier),
+    impressions: Math.round(18000 * multiplier),
+    ctr: Number((0.052 + multiplier * 0.006).toFixed(4)),
+    estimatedMinutesWatched: Number((420 * multiplier).toFixed(2)),
+    averageViewDuration: Number((44 + multiplier * 5).toFixed(2)),
+    averageViewPercentage: Number((38 + multiplier * 7).toFixed(2)),
+    rawMetrics: {
+      mock: true,
+      checkpointKey
+    }
+  };
+}
+
+function formatDate(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 export function normalizeScopes(scopes: unknown): string[] {

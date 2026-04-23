@@ -126,6 +126,18 @@ enum AccountHealthSeverity {
   HIGH
 }
 
+enum PerformanceCheckpointKey {
+  H24
+  H72
+  D7
+  D30
+}
+
+enum PerformanceCheckpointStatus {
+  CAPTURED
+  STALE
+}
+
 model Workspace {
   id                    String                 @id @default(cuid())
   name                  String
@@ -205,6 +217,7 @@ model Creator {
   workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   connectedAccounts ConnectedAccount[]
   assets            Asset[]
+  learningProfile   CreatorLearningProfile?
 }
 
 model ConnectedAccount {
@@ -320,6 +333,16 @@ model MetadataVariant {
   thumbnailBrief String
   hashtags       Json
   keywords       Json
+  score          Float                  @default(0)
+  angle          String?
+  isSelected     Boolean                @default(false)
+  reasoning      String?
+  niche          String?
+  viralScore     Float?
+  scheduledDay   Int?
+  scheduledHour  Int?
+  agentTrace     Json?
+  processingMs   Int?
   modelVersion   String
   createdAt      DateTime               @default(now())
   asset          Asset                  @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -400,6 +423,7 @@ model PlatformPost {
   decision           DistributionDecision  @relation(fields: [decisionId], references: [id], onDelete: Cascade)
   connectedAccount   ConnectedAccount?     @relation(fields: [connectedAccountId], references: [id], onDelete: SetNull)
   snapshots          PostMetricsSnapshot[]
+  performanceCheckpoints PostPerformanceCheckpoint[]
 }
 
 model PostMetricsSnapshot {
@@ -416,6 +440,44 @@ model PostMetricsSnapshot {
   followerConversion Int?
   rawMetrics         Json
   platformPost       PlatformPost @relation(fields: [platformPostId], references: [id], onDelete: Cascade)
+}
+
+model PostPerformanceCheckpoint {
+  id                     String                      @id @default(cuid())
+  platformPostId         String
+  checkpointKey          PerformanceCheckpointKey
+  status                 PerformanceCheckpointStatus @default(CAPTURED)
+  capturedAt             DateTime                    @default(now())
+  views                  Int?
+  impressions            Int?
+  ctr                    Float?
+  estimatedMinutesWatched Float?
+  averageViewDuration    Float?
+  averageViewPercentage  Float?
+  rawMetrics             Json?
+  platformPost           PlatformPost                @relation(fields: [platformPostId], references: [id], onDelete: Cascade)
+
+  @@unique([platformPostId, checkpointKey])
+  @@index([checkpointKey, capturedAt(sort: Desc)])
+}
+
+model CreatorLearningProfile {
+  id                            String   @id @default(cuid())
+  creatorId                     String   @unique
+  titlePatternWeights           Json
+  publishTimeWeights            Json
+  thumbnailStyleWeights         Json
+  keywordWeights                Json
+  angleWeights                  Json
+  sampleSize                    Int      @default(0)
+  confidence                    Float    @default(0)
+  lastLearnedAt                 DateTime?
+  lastSynthesizedAt             DateTime?
+  lastSynthesizedCheckpointCount Int     @default(0)
+  summary                       Json?
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+  creator                       Creator  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
 }
 
 model PlatformQuotaLedger {

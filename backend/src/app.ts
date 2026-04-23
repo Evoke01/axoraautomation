@@ -25,6 +25,7 @@ import { AuthService } from "./services/auth-service.js";
 import { CampaignService } from "./services/campaign-service.js";
 import { ConnectionService } from "./services/connection-service.js";
 import { DashboardService } from "./services/dashboard-service.js";
+import { LearningService } from "./services/learning-service.js";
 import { MetadataService } from "./services/metadata-service.js";
 import { MultiAgentService } from "./services/multi-agent-service.js";
 import { OptimizationService } from "./services/optimization-service.js";
@@ -53,6 +54,7 @@ export type AppServices = {
   campaigns: CampaignService;
   optimization: OptimizationService;
   dashboard: DashboardService;
+  learning: LearningService;
   connections: ConnectionService;
   youtube: YouTubeAdapter;
   instagram: InstagramAdapter;
@@ -88,6 +90,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const dashboard = new DashboardService(prisma);
   const connections = new ConnectionService(prisma, audit);
   const youtube = new YouTubeAdapter(prisma, storage, audit);
+  const learning = new LearningService(prisma, youtube);
   const youtubeHistory = new YouTubeHistoryService(prisma, queue, youtube);
   const instagram = new InstagramAdapter(prisma, audit);
   const tiktok = new TikTokAdapter(prisma, audit);
@@ -111,6 +114,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
     campaigns,
     optimization,
     dashboard,
+    learning,
     connections,
     youtube,
     youtubeHistory,

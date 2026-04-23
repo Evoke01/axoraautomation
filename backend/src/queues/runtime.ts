@@ -1,10 +1,11 @@
 import { Worker } from "bullmq";
-import { Platform, PostStatus } from "@prisma/client";
+import { Platform, PostStatus, type PerformanceCheckpointKey } from "@prisma/client";
 
 import type { AppServices } from "../app.js";
 import { ValidationError } from "../lib/errors.js";
 import { withLeaderLock } from "../lib/leader-lock.js";
 import { isWeeklyReportWindow } from "../lib/time.js";
+import { PERFORMANCE_CHECKPOINT_KEYS, getCheckpointOffsetMs } from "../lib/youtube-learning.js";
 import { getNextYouTubePostMetricDelayMinutes } from "../lib/youtube-freshness.js";
 import { buildJobId, getJobPolicy } from "./job-policy.js";
 import { JobName, QUEUE_NAME } from "./names.js";
@@ -170,7 +171,7 @@ export function createWorker(services: AppServices) {
           );
 
           try {
-            await services.youtube.publish(decisionId);
+            const post = await services.youtube.publish(decisionId);
             await services.quota.markUsed(
               Platform.YOUTUBE,
               decision.connectedAccountId,
@@ -181,10 +182,7 @@ export function createWorker(services: AppServices) {
               where: { id: decision.campaignWave.campaign.asset.id },
               data: { status: "PUBLISHED" }
             });
-
-            const post = await services.prisma.platformPost.findUnique({
-              where: { decisionId }
-            });
+            await scheduleLearningCheckpointJobs(services, post.id, post.publishedAt ?? new Date());
           } catch (error) {
             await services.quota.releaseReservation(
               Platform.YOUTUBE,
@@ -235,6 +233,47 @@ export function createWorker(services: AppServices) {
           });
 
           await services.optimization.recompute(post.workspaceId);
+          break;
+        }
+        case JobName.MetricsCheckpointCapture: {
+          const postId = asString(job.data.postId);
+          const checkpointKey = asCheckpointKey(job.data.checkpointKey);
+          const result = await services.learning.captureCheckpoint(postId, checkpointKey);
+
+          if (result.status === "retry") {
+            await services.queue.add(
+              JobName.MetricsCheckpointCapture,
+              { postId, checkpointKey },
+              {
+                ...getJobPolicy(JobName.MetricsCheckpointCapture),
+                delay: result.delayMs,
+                jobId: buildJobId(
+                  JobName.MetricsCheckpointCapture,
+                  `${postId}:${checkpointKey}:retry:${Date.now()}`
+                )
+              }
+            );
+          }
+
+          if (result.status === "captured") {
+            await services.queue.add(
+              JobName.LearningRun,
+              { creatorId: result.creatorId, checkpointKey },
+              {
+                ...getJobPolicy(JobName.LearningRun),
+                jobId: buildJobId(JobName.LearningRun, `${result.creatorId}:${Date.now()}`)
+              }
+            );
+          }
+          break;
+        }
+        case JobName.LearningRun: {
+          const creatorId = asString(job.data.creatorId);
+          const checkpointKey =
+            typeof job.data.checkpointKey === "string"
+              ? asCheckpointKey(job.data.checkpointKey)
+              : null;
+          await services.learning.recomputeCreatorProfile(creatorId, { triggerCheckpointKey: checkpointKey });
           break;
         }
         case JobName.YouTubePostMetricsRefresh: {
@@ -353,4 +392,37 @@ function asString(value: unknown) {
   }
 
   return value;
+}
+
+function asCheckpointKey(value: unknown): PerformanceCheckpointKey {
+  if (
+    value === "H24" ||
+    value === "H72" ||
+    value === "D7" ||
+    value === "D30"
+  ) {
+    return value;
+  }
+
+  throw new ValidationError("Job payload is missing a valid checkpoint key.");
+}
+
+export async function scheduleLearningCheckpointJobs(
+  services: AppServices,
+  postId: string,
+  publishedAt: Date
+) {
+  await Promise.all(
+    PERFORMANCE_CHECKPOINT_KEYS.map((checkpointKey) =>
+      services.queue.add(
+        JobName.MetricsCheckpointCapture,
+        { postId, checkpointKey },
+        {
+          ...getJobPolicy(JobName.MetricsCheckpointCapture),
+          delay: Math.max(0, publishedAt.getTime() + getCheckpointOffsetMs(checkpointKey) - Date.now()),
+          jobId: buildJobId(JobName.MetricsCheckpointCapture, `${postId}:${checkpointKey}`)
+        }
+      )
+    )
+  );
 }

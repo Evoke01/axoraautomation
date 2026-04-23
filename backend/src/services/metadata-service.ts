@@ -3,10 +3,12 @@ import crypto from "node:crypto";
 import { Platform, type PrismaClient } from "@prisma/client";
 
 import { NotFoundError } from "../lib/errors.js";
-import { MultiAgentService } from "./multi-agent-service.js";
+import { buildCreatorProfilePack } from "./learning-service.js";
+import { MultiAgentService, type MetadataPipelineResult } from "./multi-agent-service.js";
 
-interface MetadataVariantDraft {
+type PersistableVariant = {
   variantKey: string;
+  angle: "curiosity" | "authority" | "controversy";
   title: string;
   hook: string;
   caption: string;
@@ -14,8 +16,10 @@ interface MetadataVariantDraft {
   thumbnailBrief: string;
   hashtags: string[];
   keywords: string[];
+  score?: number;
+  rationale?: string;
   modelVersion?: string;
-}
+};
 
 export class MetadataService {
   constructor(
@@ -27,7 +31,12 @@ export class MetadataService {
     const asset = await this.prisma.asset.findUnique({
       where: { id: assetId },
       include: {
-        creator: true,
+        workspace: true,
+        creator: {
+          include: {
+            learningProfile: true
+          }
+        },
         files: true,
         tags: true
       }
@@ -42,22 +51,25 @@ export class MetadataService {
       throw new NotFoundError("Asset file was not found.");
     }
 
-    let variants = await this.agents.generateMetadataVariants({
-      title: asset.title,
-      rawNotes: asset.rawNotes,
-      creatorName: asset.creator.name,
-      creatorNiche: asset.creator.niche,
-      creatorBrandVoice: asset.creator.brandVoice,
-      durationSeconds: file.durationSeconds,
-      intelligence:
-        asset.intelligence && typeof asset.intelligence === "object"
-          ? (asset.intelligence as Record<string, unknown>)
-          : null
-    });
-
-    if (!variants || variants.length === 0) {
-      variants = this.generateHeuristic(asset, file);
-    }
+    const pipeline =
+      (await this.agents
+        .generateMetadataPipeline({
+          workspaceId: asset.workspaceId,
+          timezone: asset.workspace.timezone,
+          title: asset.title,
+          rawNotes: asset.rawNotes,
+          creatorName: asset.creator.name,
+          creatorNiche: asset.creator.niche,
+          creatorBrandVoice: asset.creator.brandVoice,
+          creatorProfilePack: buildCreatorProfilePack(asset.creator.learningProfile),
+          durationSeconds: file.durationSeconds,
+          intelligence:
+            asset.intelligence && typeof asset.intelligence === "object"
+              ? (asset.intelligence as Record<string, unknown>)
+              : null
+        })
+        .catch(() => null)) ??
+      buildHeuristicPipeline(asset, file);
 
     await this.prisma.metadataVariant.deleteMany({
       where: {
@@ -67,7 +79,7 @@ export class MetadataService {
     });
 
     const created = await Promise.all(
-      variants.map((variant) =>
+      pipeline.variants.map((variant, index) =>
         this.prisma.metadataVariant.create({
           data: {
             assetId,
@@ -80,6 +92,16 @@ export class MetadataService {
             thumbnailBrief: variant.thumbnailBrief,
             hashtags: variant.hashtags,
             keywords: variant.keywords,
+            score: variant.score ?? 0,
+            angle: variant.angle,
+            isSelected: index === 0,
+            reasoning: variant.rationale ?? null,
+            niche: pipeline.classification.niche,
+            viralScore: pipeline.classification.viralScore,
+            scheduledDay: pipeline.schedule.dayOfWeek,
+            scheduledHour: pipeline.schedule.hourLocal,
+            agentTrace: pipeline.agentTrace as any,
+            processingMs: pipeline.processingMs,
             modelVersion:
               variant.modelVersion ??
               `heuristic-${crypto
@@ -87,20 +109,28 @@ export class MetadataService {
                 .update(asset.updatedAt.toISOString())
                 .digest("hex")
                 .slice(0, 8)}`
-          }
+          } as any
         })
       )
     );
+
+    const intelligence = asset.intelligence && typeof asset.intelligence === "object"
+      ? (asset.intelligence as Record<string, unknown>)
+      : {};
+    const mergedIntelligence = {
+      ...intelligence,
+      classification: pipeline.classification,
+      schedule: pipeline.schedule,
+      metadataProcessingMs: pipeline.processingMs
+    };
 
     const keywordPool = buildKeywordPool([
       asset.title,
       asset.rawNotes ?? "",
       asset.creator.niche ?? "",
       asset.creator.brandVoice ?? "",
-      ...(asset.intelligence && typeof asset.intelligence === "object"
-        ? normalizeUnknownStringArray((asset.intelligence as Record<string, unknown>).keywords)
-        : []),
-      ...variants.flatMap((variant) => variant.keywords)
+      ...normalizeUnknownStringArray(readValue(intelligence, "keywords")),
+      ...pipeline.variants.flatMap((variant) => variant.keywords)
     ]);
 
     await this.prisma.assetTag.deleteMany({ where: { assetId } });
@@ -113,70 +143,120 @@ export class MetadataService {
       skipDuplicates: true
     });
 
+    await this.prisma.asset.update({
+      where: { id: assetId },
+      data: {
+        intelligence: mergedIntelligence as any
+      }
+    });
+
     return created;
   }
+}
 
-  private generateHeuristic(
-    asset: {
-      title: string;
-      rawNotes: string | null;
-      creator: { name: string; niche: string | null; brandVoice: string | null };
-      intelligence: unknown;
+function buildHeuristicPipeline(
+  asset: {
+    title: string;
+    rawNotes: string | null;
+    updatedAt: Date;
+    creator: { niche: string | null; brandVoice: string | null };
+    intelligence: unknown;
+  },
+  file: { durationSeconds: number | null }
+): MetadataPipelineResult {
+  const intelligence =
+    asset.intelligence && typeof asset.intelligence === "object"
+      ? (asset.intelligence as Record<string, unknown>)
+      : null;
+  const keywordPool = buildKeywordPool([
+    asset.title,
+    asset.rawNotes ?? "",
+    asset.creator.niche ?? "",
+    asset.creator.brandVoice ?? "",
+    ...normalizeUnknownStringArray(readValue(intelligence, "keywords"))
+  ]);
+
+  const variants: PersistableVariant[] = [
+    {
+      variantKey: "curiosity",
+      angle: "curiosity",
+      title: `Why ${titleCase(keywordPool[0] ?? "this niche")} is moving now`,
+      hook: `The ${keywordPool[1] ?? "timing"} angle most creators miss.`,
+      caption: clipText(`${asset.title}. Built around a curiosity-first hook for short-form retention.`, 160),
+      cta: "Watch to the end for the full breakdown.",
+      thumbnailBrief: "Curiosity-led text with one unresolved promise.",
+      hashtags: keywordPool.slice(0, 5),
+      keywords: keywordPool.slice(0, 6),
+      score: 0.71,
+      rationale: "Heuristic curiosity-first winner.",
+      modelVersion: "heuristic-curiosity"
     },
-    file: { durationSeconds: number | null }
-  ): MetadataVariantDraft[] {
-    const intelligenceKeywords =
-      asset.intelligence && typeof asset.intelligence === "object"
-        ? normalizeUnknownStringArray((asset.intelligence as Record<string, unknown>).keywords)
-        : [];
-    const keywordPool = buildKeywordPool([
-      asset.title,
-      asset.rawNotes ?? "",
-      asset.creator.niche ?? "",
-      asset.creator.brandVoice ?? "",
-      ...intelligenceKeywords
-    ]);
+    {
+      variantKey: "authority",
+      angle: "authority",
+      title: `${titleCase(keywordPool[0] ?? "Creator")} playbook that still works`,
+      hook: `Here is the framework I would use again.`,
+      caption: clipText(`${asset.title}. Direct expert framing with the most useful takeaway first.`, 160),
+      cta: "Save this for the next upload.",
+      thumbnailBrief: "Expert framing with one proof point.",
+      hashtags: keywordPool.slice(0, 5),
+      keywords: keywordPool.slice(0, 6),
+      score: 0.65,
+      rationale: "Heuristic authority angle.",
+      modelVersion: "heuristic-authority"
+    },
+    {
+      variantKey: "controversy",
+      angle: "controversy",
+      title: `Most people get ${titleCase(keywordPool[0] ?? "content")} wrong`,
+      hook: `The common advice here is overrated.`,
+      caption: clipText(`${asset.title}. Contrarian framing that stays brand-safe and discussion-friendly.`, 160),
+      cta: "Comment if you disagree.",
+      thumbnailBrief: "Bold statement with a sharp contrast claim.",
+      hashtags: keywordPool.slice(0, 5),
+      keywords: keywordPool.slice(0, 6),
+      score: 0.59,
+      rationale: "Heuristic controversy angle.",
+      modelVersion: "heuristic-controversy"
+    }
+  ];
 
-    const contentCategory = keywordPool[0] ? titleCase(keywordPool[0]) : "Creator Strategy";
-    const hookBase = keywordPool[1] ? titleCase(keywordPool[1]) : "Growth";
-    const fileShape = file.durationSeconds && file.durationSeconds <= 60 ? "short-form" : "long-form";
-
-    return [
+  return {
+    insights: {
+      hook: readString(intelligence, "hook") ?? asset.title,
+      mainPoint: readString(intelligence, "mainPoint") ?? asset.rawNotes ?? asset.title,
+      vibe: readString(intelligence, "vibe") ?? "educational",
+      keywords: keywordPool.slice(0, 6),
+      summary: readString(intelligence, "summary") ?? asset.title
+    },
+    variants,
+    classification: {
+      niche: asset.creator.niche ?? keywordPool[0] ?? "general",
+      nicheConfidence: 0.35,
+      engagementLabel: "steady evergreen interest",
+      engagementConfidence: 0.3,
+      viralScore: file.durationSeconds && file.durationSeconds <= 60 ? 0.58 : 0.44,
+      provider: "heuristic"
+    },
+    schedule: {
+      dayOfWeek: 2,
+      hourLocal: 18,
+      minuteLocal: 0,
+      confidence: 0.5,
+      rationale: "Heuristic local evening schedule.",
+      provider: "heuristic"
+    },
+    processingMs: 0,
+    agentTrace: [
       {
-        variantKey: "primary",
-        title: `${asset.title}: ${hookBase} playbook`,
-        hook: `The ${hookBase.toLowerCase()} angle creators keep missing.`,
-        caption: `${asset.title}. Built for ${fileShape} attention around ${contentCategory.toLowerCase()}.`,
-        cta: "Follow Axora for the next wave.",
-        thumbnailBrief: `High-contrast thumbnail featuring ${contentCategory} and one bold promise.`,
-        hashtags: keywordPool.slice(0, 4).map((keyword) => `#${keyword}`),
-        keywords: keywordPool.slice(0, 8),
-        modelVersion: "heuristic-primary"
-      },
-      {
-        variantKey: "curiosity",
-        title: `Why ${titleCase(keywordPool[0] ?? "this niche")} is opening up now`,
-        hook: `Nobody is timing ${contentCategory.toLowerCase()} correctly yet.`,
-        caption: `This upload is framed around a whitespace opportunity in ${contentCategory.toLowerCase()}.`,
-        cta: "Watch the breakdown and track the next move.",
-        thumbnailBrief: "Minimal thumbnail with a whitespace claim and one sharp contrast number.",
-        hashtags: keywordPool.slice(0, 3).map((keyword) => `#${keyword}`),
-        keywords: keywordPool.slice(0, 5),
-        modelVersion: "heuristic-curiosity"
-      },
-      {
-        variantKey: "direct",
-        title: `${contentCategory} in ${Math.max(1, Math.round(file.durationSeconds ?? 30))} seconds`,
-        hook: `${asset.title} with a sharper, outcome-first angle.`,
-        caption: `Direct version for high-intent viewers. Angle: ${hookBase}.`,
-        cta: "Save this before the next repackaged drop.",
-        thumbnailBrief: "Outcome-first thumbnail with no more than four words.",
-        hashtags: keywordPool.slice(0, 2).map((keyword) => `#${keyword}`),
-        keywords: keywordPool.slice(0, 4),
-        modelVersion: "heuristic-direct"
+        agent: "metadata-fallback",
+        model: "heuristic",
+        latencyMs: 0,
+        cached: false,
+        success: true
       }
-    ];
-  }
+    ]
+  };
 }
 
 function buildKeywordPool(source: string[]) {
@@ -187,7 +267,7 @@ function buildKeywordPool(source: string[]) {
         .split(/[^a-z0-9]+/)
         .filter((token) => token.length > 3)
     )
-    .slice(0, 16);
+    .slice(0, 20);
 
   return [...new Set(tokens)];
 }
@@ -200,6 +280,23 @@ function normalizeUnknownStringArray(value: unknown) {
   return value
     .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
     .map((entry) => entry.trim().toLowerCase());
+}
+
+function readValue(record: Record<string, unknown> | null, key: string) {
+  return record ? record[key] : undefined;
+}
+
+function readString(record: Record<string, unknown> | null, key: string) {
+  const value = readValue(record, key);
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function clipText(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return value.slice(0, maxLength - 1).trim();
 }
 
 function titleCase(value: string) {

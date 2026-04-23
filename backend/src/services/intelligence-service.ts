@@ -70,24 +70,20 @@ export class IntelligenceService {
       }
     }
 
-    const enriched = await this.agents.enrichIntelligence(
-      {
-        title: asset.title,
-        rawNotes: asset.rawNotes,
-        creatorNiche: asset.creator.niche,
-        baseProvider
-      },
-      analysis
-    );
-
     await this.prisma.asset.update({
       where: { id: assetId },
       data: {
-        intelligence: enriched
+        intelligence: {
+          ...analysis,
+          provider: baseProvider
+        }
       }
     });
 
-    return enriched;
+    return {
+      ...analysis,
+      provider: baseProvider
+    };
   }
 
   private async runGeminiAnalysis(input: {

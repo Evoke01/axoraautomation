@@ -155,6 +155,29 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return { queued: true };
   });
 
+  app.post("/intelligence/learning/refresh", async (request) => {
+    const session = await app.services.auth.resolveSession(request.headers);
+    const creators = await app.services.prisma.creator.findMany({
+      where: { workspaceId: session.workspace.id },
+      select: { id: true }
+    });
+
+    await Promise.all(
+      creators.map((creator) =>
+        app.services.queue.add(
+          JobName.LearningRun,
+          { creatorId: creator.id },
+          {
+            ...getJobPolicy(JobName.LearningRun),
+            jobId: buildJobId(JobName.LearningRun, `${creator.id}:${Date.now()}:${Math.random().toString(16).slice(2, 8)}`)
+          }
+        )
+      )
+    );
+
+    return { queued: true, creators: creators.length };
+  });
+
   app.post("/intelligence/generate", async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     await app.services.queue.add(

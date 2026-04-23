@@ -366,7 +366,10 @@ export function createWorker(services: AppServices) {
             for (const creator of creators) {
               const activeCampaignsCount = await services.prisma.campaign.count({
                 where: {
-                  asset: { creatorId: creator.id },
+                  asset: { 
+                    creatorId: creator.id,
+                    status: { not: "ARCHIVED" }
+                  },
                   status: { in: ["ACTIVE", "DRAFT"] }
                 }
               });

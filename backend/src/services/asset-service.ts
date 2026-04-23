@@ -189,6 +189,11 @@ export class AssetService {
           status: "ARCHIVED"
         }
       });
+      // Also archive all campaigns for this asset
+      await this.prisma.campaign.updateMany({
+        where: { assetId: asset.id },
+        data: { status: "ARCHIVED" }
+      });
     }
 
     if (input.scheduleFor) {

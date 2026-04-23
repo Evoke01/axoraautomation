@@ -113,9 +113,20 @@ export function AssetLibrary() {
     return (
       <div className="space-y-6">
         <h2 className="text-2xl">Asset library</h2>
-        <div className="flex items-center gap-3 text-zinc-400 p-8 sm:p-12 justify-center">
-          <Loader2 size={18} className="animate-spin" />
-          <span className="text-sm">Loading assets...</span>
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 sm:p-6 h-32 animate-pulse flex flex-col justify-between">
+              <div className="flex gap-3 items-center">
+                <div className="w-4 h-4 rounded-full bg-white/10" />
+                <div className="h-4 w-24 bg-white/10 rounded" />
+              </div>
+              <div className="h-6 w-64 bg-white/10 rounded" />
+              <div className="flex gap-2 mt-2">
+                <div className="h-6 w-16 bg-white/10 rounded-md" />
+                <div className="h-6 w-24 bg-white/10 rounded-md" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -321,20 +332,38 @@ export function AssetLibrary() {
                       ) : (
                         <div className="flex justify-between items-center">
                           <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Distribution Plan</h4>
-                          <button
-                            onClick={() => {
-                              const variant = asset.metadataVariants?.[0];
-                              setEditForm({
-                                title: variant?.title || asset.title || '',
-                                caption: variant?.caption || '',
-                                thumbnailBrief: variant?.thumbnailBrief || '',
-                              });
-                              setEditingId(asset.id);
-                            }}
-                            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
-                          >
-                            <Edit2 size={12} /> Edit Video
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const variant = asset.metadataVariants?.[0];
+                                setEditForm({
+                                  title: variant?.title || asset.title || '',
+                                  caption: variant?.caption || '',
+                                  thumbnailBrief: variant?.thumbnailBrief || '',
+                                });
+                                setEditingId(asset.id);
+                              }}
+                              className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+                            >
+                              <Edit2 size={12} /> Edit Video
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm("Are you sure you want to archive this video? It will be removed from your dashboard and queue.")) return;
+                                setSaving(true);
+                                try {
+                                  await api.assets.override(asset.id, { archive: true });
+                                  setAssets(prev => prev.filter(a => a.id !== asset.id));
+                                } finally {
+                                  setSaving(false);
+                                }
+                              }}
+                              disabled={saving}
+                              className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition-colors"
+                            >
+                              <Archive size={12} /> Archive
+                            </button>
+                          </div>
                         </div>
                       )}
 

@@ -132,9 +132,22 @@ export function Queue() {
     return (
       <div className="space-y-6">
         <h2 className="text-2xl">Post queue</h2>
-        <div className="flex items-center gap-3 text-zinc-400 p-8 sm:p-12 justify-center">
-          <Loader2 size={18} className="animate-spin" />
-          <span className="text-sm">Loading queue...</span>
+        <div className="flex gap-2">
+          {[1, 2, 3, 4].map(i => <div key={i} className="h-8 w-20 bg-white/5 rounded-full animate-pulse" />)}
+        </div>
+        <div className="space-y-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 sm:p-6 h-28 animate-pulse flex flex-col justify-between">
+              <div className="flex justify-between">
+                <div className="flex gap-3 items-center">
+                  <div className="w-4 h-4 rounded-full bg-white/10" />
+                  <div className="h-4 w-32 bg-white/10 rounded" />
+                </div>
+                <div className="w-16 h-6 bg-white/10 rounded-full" />
+              </div>
+              <div className="h-6 w-48 bg-white/10 rounded mt-4" />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -230,8 +243,21 @@ export function Queue() {
                         <StatusIcon size={11} className={status === 'processing' ? 'animate-spin' : ''} />
                         {config.label}
                       </span>
-                      <button className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-all">
-                        <MoreHorizontal size={16} />
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm("Are you sure you want to archive this video? It will be removed from your dashboard and queue.")) return;
+                          try {
+                            await api.assets.override(post.asset.id, { archive: true });
+                            setPosts(prev => prev.filter(p => p.asset.id !== post.asset.id));
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                        title="Archive Asset"
+                      >
+                        <Archive size={16} />
                       </button>
                     </div>
                   </div>

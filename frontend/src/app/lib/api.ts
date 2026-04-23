@@ -60,6 +60,13 @@ export interface ApiAsset {
   totalViews?: number;
   metricsFreshnessMinutes?: number | null;
   tags: { label: string; kind: string }[];
+  metadataVariants?: Array<{
+    id: string;
+    platform: string;
+    title: string;
+    caption: string;
+    thumbnailBrief: string;
+  }>;
   campaigns: Array<{
     id: string;
     status: string;
@@ -267,6 +274,8 @@ export const api = {
       request<{ queued: boolean }>(`/assets/${id}/plan`, { method: "POST" }),
     approve: (id: string) =>
       request<{ approved: boolean }>(`/assets/${id}/approve`, { method: "POST" }),
+    override: (id: string, data: { caption?: string; title?: string; thumbnailBrief?: string; scheduleFor?: string; archive?: boolean }) =>
+      request<{ updated: boolean }>(`/assets/${id}/override`, { method: "POST", body: JSON.stringify(data) }),
   },
 
   health: {

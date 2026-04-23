@@ -25,8 +25,8 @@ export class DashboardService {
       publishedPosts,
       competitorChannels
     ] = await Promise.all([
-      this.prisma.asset.count({ where: { workspaceId } }),
-      this.prisma.platformPost.count({ where: { workspaceId, status: "PUBLISHED" } }),
+      this.prisma.asset.count({ where: { workspaceId, status: { not: "ARCHIVED" } } }),
+      this.prisma.platformPost.count({ where: { workspaceId, status: "PUBLISHED", asset: { status: { not: "ARCHIVED" } } } }),
       this.prisma.asset.count({ where: { workspaceId, status: "PENDING_REVIEW" } }),
       this.prisma.opportunityReport.findFirst({
         where: { workspaceId },
@@ -34,7 +34,7 @@ export class DashboardService {
       }),
       this.prisma.platformPost.groupBy({
         by: ["platform"],
-        where: { workspaceId, status: "PUBLISHED" },
+        where: { workspaceId, status: "PUBLISHED", asset: { status: { not: "ARCHIVED" } } },
         _count: { _all: true }
       }),
       this.prisma.platformQuotaLedger.findMany({
@@ -64,7 +64,7 @@ export class DashboardService {
         orderBy: { bucketStart: "asc" }
       }),
       this.prisma.platformPost.findMany({
-        where: { workspaceId, status: "PUBLISHED" },
+        where: { workspaceId, status: "PUBLISHED", asset: { status: { not: "ARCHIVED" } } },
         select: {
           id: true,
           lastPolledAt: true,
@@ -198,7 +198,7 @@ export class DashboardService {
   async listPosts(workspaceId: string) {
     const now = new Date();
     const posts = await this.prisma.platformPost.findMany({
-      where: { workspaceId },
+      where: { workspaceId, asset: { status: { not: "ARCHIVED" } } },
       include: {
         asset: true,
         decision: {
@@ -222,9 +222,10 @@ export class DashboardService {
   async listAssets(workspaceId: string) {
     const [assets, channelTrends, youtubeVideos] = await Promise.all([
       this.prisma.asset.findMany({
-        where: { workspaceId },
+        where: { workspaceId, status: { not: "ARCHIVED" } },
         include: {
           tags: true,
+          metadataVariants: true,
           campaigns: {
             include: {
               waves: {
@@ -323,7 +324,7 @@ export class DashboardService {
           orderBy: { computedAt: "desc" }
         }),
         this.prisma.platformPost.findMany({
-          where: { workspaceId, status: "PUBLISHED" },
+          where: { workspaceId, status: "PUBLISHED", asset: { status: { not: "ARCHIVED" } } },
           include: {
             asset: true,
             decision: true

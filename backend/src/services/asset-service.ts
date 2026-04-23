@@ -167,11 +167,20 @@ export class AssetService {
       });
     }
 
-    if (input.caption && latestDecision.metadataVariantId) {
+    if (input.title) {
+      await this.prisma.asset.update({
+        where: { id: asset.id },
+        data: { title: input.title }
+      });
+    }
+
+    if ((input.caption || input.title || input.thumbnailBrief) && latestDecision.metadataVariantId) {
       await this.prisma.metadataVariant.update({
         where: { id: latestDecision.metadataVariantId },
         data: {
-          caption: input.caption
+          ...(input.caption && { caption: input.caption }),
+          ...(input.title && { title: input.title }),
+          ...(input.thumbnailBrief && { thumbnailBrief: input.thumbnailBrief })
         }
       });
     }

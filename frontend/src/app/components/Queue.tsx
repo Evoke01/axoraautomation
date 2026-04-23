@@ -16,9 +16,7 @@ type StatusType = 'live' | 'scheduled' | 'pending' | 'processing' | 'needs-revie
 
 function mapStatus(post: ApiPost): StatusType {
   if (post.status === 'PUBLISHED') {
-    const publishedAt = post.publishedAt ? new Date(post.publishedAt).getTime() : 0;
-    if (Date.now() - publishedAt < 3 * 60 * 60 * 1000) return 'live';
-    return 'pending';
+    return 'live';
   }
   if (post.status === 'PUBLISHING') return 'processing';
   if (post.status === 'SCHEDULED') {

@@ -8,10 +8,9 @@ import { api, type ApiAsset, type ApiPost, type ApiSession, type ApiSummary } fr
 
 interface DashboardViewProps {
   session: ApiSession | null;
-  onUploaded?: () => void;
 }
 
-export function DashboardView({ session, onUploaded }: DashboardViewProps) {
+export function DashboardView({ session }: DashboardViewProps) {
   const [summary, setSummary] = useState<ApiSummary | null>(null);
   const [posts, setPosts] = useState<ApiPost[]>([]);
   const [assets, setAssets] = useState<ApiAsset[]>([]);
@@ -208,7 +207,7 @@ export function DashboardView({ session, onUploaded }: DashboardViewProps) {
           <div className="text-sm font-medium text-white">Upload</div>
           <div className="mt-1 text-xs text-zinc-500">Creator uploads once. Axora handles the rest.</div>
           <div className="mt-4">
-            <UploadZone session={session} onUploaded={onUploaded} />
+            <UploadZone session={session} onUploaded={() => void loadDashboard()} />
           </div>
         </div>
       </div>

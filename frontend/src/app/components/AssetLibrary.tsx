@@ -1,4 +1,4 @@
-import { Play, RefreshCw, Archive, ChevronDown, Loader2, Upload, ExternalLink, TrendingUp, TrendingDown } from 'lucide-react';
+import { Play, RefreshCw, Archive, ChevronDown, Loader2, Upload, ExternalLink, TrendingUp, TrendingDown, Edit2, Save, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api, type ApiAsset } from '../lib/api';
@@ -59,6 +59,37 @@ export function AssetLibrary() {
   const [assets, setAssets] = useState<ApiAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ title: '', caption: '', thumbnailBrief: '' });
+  const [saving, setSaving] = useState(false);
+
+  const handleEditSave = async (assetId: string) => {
+    setSaving(true);
+    try {
+      await api.assets.override(assetId, {
+        title: editForm.title,
+        caption: editForm.caption,
+        thumbnailBrief: editForm.thumbnailBrief,
+      });
+      setAssets((prev) => prev.map((a) => {
+        if (a.id === assetId) {
+          const updatedVariants = a.metadataVariants ? [...a.metadataVariants] : [];
+          if (updatedVariants.length > 0) {
+            updatedVariants[0].title = editForm.title;
+            updatedVariants[0].caption = editForm.caption;
+            updatedVariants[0].thumbnailBrief = editForm.thumbnailBrief;
+          }
+          return { ...a, title: editForm.title, metadataVariants: updatedVariants };
+        }
+        return a;
+      }));
+      setEditingId(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     const load = () =>
@@ -151,7 +182,14 @@ export function AssetLibrary() {
             >
               <div className="absolute top-[-50px] left-[-50px] w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
               <button
-                onClick={() => setExpanded(isExpanded ? null : asset.id)}
+                onClick={() => {
+                  if (expanded === asset.id) {
+                    setExpanded(null);
+                    setEditingId(null);
+                  } else {
+                    setExpanded(asset.id);
+                  }
+                }}
                 className="w-full p-4 sm:p-6 text-left hover:bg-white/[0.02] transition-colors relative z-10"
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -227,6 +265,79 @@ export function AssetLibrary() {
                     className="border-t border-white/10 overflow-hidden"
                   >
                     <div className="p-4 sm:p-6 space-y-4">
+                      {editingId === asset.id ? (
+                        <div className="space-y-4 bg-white/5 border border-white/10 p-4 rounded-xl">
+                          <div className="flex justify-between items-center mb-2">
+                            <h4 className="font-medium text-white">Edit Video Details</h4>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setEditingId(null)}
+                                className="p-1.5 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
+                              <input
+                                type="text"
+                                value={editForm.title}
+                                onChange={(e) => setEditForm(prev => ({ ...prev, title: e.target.value }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-zinc-400 mb-1">Description (Caption)</label>
+                              <textarea
+                                value={editForm.caption}
+                                onChange={(e) => setEditForm(prev => ({ ...prev, caption: e.target.value }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500 h-24 resize-y"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-zinc-400 mb-1">Thumbnail Brief</label>
+                              <textarea
+                                value={editForm.thumbnailBrief}
+                                onChange={(e) => setEditForm(prev => ({ ...prev, thumbnailBrief: e.target.value }))}
+                                className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500 h-16 resize-y"
+                                placeholder="Describe the thumbnail layout, text, etc."
+                              />
+                            </div>
+                            <div className="flex justify-end pt-2">
+                              <button
+                                onClick={() => void handleEditSave(asset.id)}
+                                disabled={saving}
+                                className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-md text-sm font-medium hover:bg-zinc-200 transition-colors disabled:opacity-50"
+                              >
+                                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                Save Changes
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Distribution Plan</h4>
+                          <button
+                            onClick={() => {
+                              const variant = asset.metadataVariants?.[0];
+                              setEditForm({
+                                title: variant?.title || asset.title || '',
+                                caption: variant?.caption || '',
+                                thumbnailBrief: variant?.thumbnailBrief || '',
+                              });
+                              setEditingId(asset.id);
+                            }}
+                            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+                          >
+                            <Edit2 size={12} /> Edit Video
+                          </button>
+                        </div>
+                      )}
+
                       {allWaves.length === 0 ? (
                         <p className="text-sm text-zinc-600 italic">No waves yet - planning in progress.</p>
                       ) : (

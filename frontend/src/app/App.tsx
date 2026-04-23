@@ -17,7 +17,6 @@ export default function App() {
   const [activeView, setActiveView] = useState(initialView);
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dashboardKey, setDashboardKey] = useState(0);
 
   useEffect(() => {
     // Artificial delay to show loading screen
@@ -30,10 +29,6 @@ export default function App() {
 
     return () => clearTimeout(timer);
   }, []);
-
-  function handleUploaded() {
-    setDashboardKey(k => k + 1);
-  }
 
   // Show waitlist ONLY on specific preview URL
   if (isWaitlistPreview) {
@@ -70,7 +65,7 @@ export default function App() {
 
         <main className="flex-1 overflow-auto relative z-10">
           {activeView === 'dashboard' && (
-            <DashboardView key={dashboardKey} session={session} onUploaded={handleUploaded} />
+            <DashboardView session={session} />
           )}
           {activeView === 'queue' && <div className="p-8"><Queue /></div>}
           {activeView === 'assets' && <div className="p-8"><AssetLibrary /></div>}

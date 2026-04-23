@@ -118,7 +118,14 @@ export async function registerApiRoutes(app: FastifyInstance) {
     return { updated: true };
   });
 
-  app.get("/posts", async (request) => {
+  app.post('/assets/:id/retry', async (request) => {
+    await app.services.auth.resolveSession(request.headers);
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    await app.services.assets.retryAssetIngest(params.id);
+    return { queued: true };
+  });
+
+  app.get('/posts', async (request) => {
     const session = await app.services.auth.resolveSession(request.headers);
     return app.services.dashboard.listPosts(session.workspace.id);
   });

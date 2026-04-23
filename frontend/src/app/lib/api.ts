@@ -297,6 +297,8 @@ export const api = {
       request<{ approved: boolean }>(`/assets/${id}/approve`, { method: "POST" }),
     override: (id: string, data: { caption?: string; title?: string; thumbnailBrief?: string; scheduleFor?: string; archive?: boolean }) =>
       request<{ updated: boolean }>(`/assets/${id}/override`, { method: "POST", body: JSON.stringify(data) }),
+    retry: (id: string) =>
+      request<{ queued: boolean }>(`/assets/${id}/retry`, { method: "POST" }),
   },
 
   health: {

@@ -86,6 +86,35 @@ export class AssetService {
     return asset;
   }
 
+  async retryAssetIngest(assetId: string) {
+    const asset = await this.prisma.asset.findUnique({
+      where: { id: assetId }
+    });
+
+    if (!asset) {
+      throw new NotFoundError("Asset not found.");
+    }
+
+    if (asset.status !== "VALIDATING" && asset.status !== "REJECTED") {
+      throw new ValidationError("Only validating or rejected assets can be retried.");
+    }
+
+    // Reset status to VALIDATING if it was REJECTED
+    if (asset.status === "REJECTED") {
+      await this.prisma.asset.update({
+        where: { id: asset.id },
+        data: { status: "VALIDATING", rejectionReason: null }
+      });
+    }
+
+    await this.queue.add(JobName.AssetIngest, { assetId: asset.id }, {
+      ...getJobPolicy(JobName.AssetIngest),
+      jobId: buildJobId(JobName.AssetIngest, asset.id)
+    });
+
+    return { success: true };
+  }
+
   async getAsset(assetId: string) {
     const asset = await this.prisma.asset.findUnique({
       where: { id: assetId },

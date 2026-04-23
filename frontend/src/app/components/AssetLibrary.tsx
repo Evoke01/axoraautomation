@@ -363,6 +363,27 @@ export function AssetLibrary() {
                             >
                               <Archive size={12} /> Archive
                             </button>
+                            {(asset.status === 'VALIDATING' || asset.status === 'REJECTED') && (
+                              <button
+                                onClick={async () => {
+                                  setSaving(true);
+                                  try {
+                                    await api.assets.retry(asset.id);
+                                    setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, status: 'VALIDATING' } : a));
+                                    alert('Retry queued successfully!');
+                                  } catch (err) {
+                                    console.error(err);
+                                    alert('Failed to queue retry.');
+                                  } finally {
+                                    setSaving(false);
+                                  }
+                                }}
+                                disabled={saving}
+                                className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 transition-colors"
+                              >
+                                <RefreshCw size={12} /> Retry Analysis
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}

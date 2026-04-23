@@ -139,7 +139,11 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   await app.register(sensible);
   await registerApiRoutes(app);
 
-  await registerRecurringJobs(app.services);
+  try {
+    await registerRecurringJobs(app.services);
+  } catch (err) {
+    app.log.error(err, "Failed to register recurring jobs (Upstash Redis incompatibility with BullMQ repeatable jobs)");
+  }
   const worker = createWorker(app.services);
 
   app.setErrorHandler((error: any, request, reply) => {

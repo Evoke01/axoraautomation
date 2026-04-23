@@ -64,6 +64,9 @@ const envSchema = z.object({
     .string()
     .url()
     .default("https://router.huggingface.co/hf-inference/models"),
+  NVIDIA_API_KEY: z.string().optional(),
+  NVIDIA_BASE_URL: z.string().url().default("https://integrate.api.nvidia.com/v1"),
+  NVIDIA_MODEL: z.string().default("nvidia/llama-3.1-nemotron-70b-instruct"),
   OLLAMA_BASE_URL: z.string().url().optional(),
   OLLAMA_MODEL: z.string().optional(),
   OLLAMA_EMBEDDING_MODEL: z.string().optional(),

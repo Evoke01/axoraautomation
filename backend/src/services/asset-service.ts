@@ -182,11 +182,19 @@ export class AssetService {
       .flatMap((wave) => wave.decisions)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
 
-    if (!latestDecision) {
-      throw new ValidationError("Asset has no planned decision to override.");
+    if (input.archive) {
+      await this.prisma.asset.update({
+        where: { id: asset.id },
+        data: {
+          status: "ARCHIVED"
+        }
+      });
     }
 
     if (input.scheduleFor) {
+      if (!latestDecision) {
+        throw new ValidationError("Asset has no planned decision to override schedule.");
+      }
       await this.prisma.distributionDecision.update({
         where: { id: latestDecision.id },
         data: {
@@ -203,22 +211,13 @@ export class AssetService {
       });
     }
 
-    if ((input.caption || input.title || input.thumbnailBrief) && latestDecision.metadataVariantId) {
+    if ((input.caption || input.title || input.thumbnailBrief) && latestDecision?.metadataVariantId) {
       await this.prisma.metadataVariant.update({
         where: { id: latestDecision.metadataVariantId },
         data: {
           ...(input.caption && { caption: input.caption }),
           ...(input.title && { title: input.title }),
           ...(input.thumbnailBrief && { thumbnailBrief: input.thumbnailBrief })
-        }
-      });
-    }
-
-    if (input.archive) {
-      await this.prisma.asset.update({
-        where: { id: asset.id },
-        data: {
-          status: "ARCHIVED"
         }
       });
     }

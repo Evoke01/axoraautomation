@@ -219,23 +219,28 @@ export class MultiAgentService {
     insights: VisionInsights,
     trace: AgentTrace[]
   ): Promise<MetadataVariantDraft[]> {
-    if (!env.GROQ_API_KEY) {
+    if (!env.NVIDIA_API_KEY && !env.GROQ_API_KEY) {
       return buildHeuristicVariants(context, insights);
     }
+
+    const useNvidia = !!env.NVIDIA_API_KEY;
+    const baseUrl = useNvidia ? env.NVIDIA_BASE_URL : env.GROQ_BASE_URL;
+    const apiKey = useNvidia ? env.NVIDIA_API_KEY : env.GROQ_API_KEY;
+    const model = useNvidia ? env.NVIDIA_MODEL : env.GROQ_MODEL;
 
     return Promise.all(
       ANGLES.map(async (angle) => {
         const latencyStartedAt = Date.now();
 
         try {
-          const response = await fetch(`${env.GROQ_BASE_URL}/chat/completions`, {
+          const response = await fetch(`${baseUrl}/chat/completions`, {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${env.GROQ_API_KEY}`,
+              Authorization: `Bearer ${apiKey}`,
               "Content-Type": "application/json"
             },
             body: JSON.stringify({
-              model: env.GROQ_MODEL,
+              model: model,
               temperature: 0.45,
               max_tokens: 220,
               messages: [
@@ -266,7 +271,7 @@ export class MultiAgentService {
           });
 
           if (!response.ok) {
-            throw new Error(`Groq ${response.status}`);
+            throw new Error(`${useNvidia ? "NVIDIA" : "Groq"} ${response.status}`);
           }
 
           const payload = (await response.json()) as {
@@ -277,7 +282,7 @@ export class MultiAgentService {
 
           trace.push({
             agent: `writer:${angle.key}`,
-            model: env.GROQ_MODEL,
+            model: model!,
             latencyMs: Date.now() - latencyStartedAt,
             cached: false,
             success: true
@@ -287,7 +292,7 @@ export class MultiAgentService {
         } catch (error) {
           trace.push({
             agent: `writer:${angle.key}`,
-            model: env.GROQ_MODEL,
+            model: model!,
             latencyMs: Date.now() - latencyStartedAt,
             cached: false,
             success: false,

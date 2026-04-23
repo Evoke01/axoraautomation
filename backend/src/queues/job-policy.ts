@@ -127,5 +127,5 @@ export function getJobPolicy(jobName: JobName): JobsOptions {
 }
 
 export function buildJobId(jobName: JobName, key: string) {
-  return `${jobName}:${key}`;
+  return `${jobName}--${key}`;
 }

@@ -128,6 +128,7 @@ export class CampaignService {
           }
         : await this.agents
             .recommendSchedule({
+              assetId: asset.id,
               workspaceId: asset.workspaceId,
               timezone: asset.workspace.timezone,
               creatorName: asset.creator.name,

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { Platform, type PrismaClient } from "@prisma/client";
 
 import { NotFoundError } from "../lib/errors.js";
+import { StorageService } from "../lib/storage.js";
 import { buildCreatorProfilePack } from "./learning-service.js";
 import { MultiAgentService, type MetadataPipelineResult } from "./multi-agent-service.js";
 
@@ -24,7 +25,8 @@ type PersistableVariant = {
 export class MetadataService {
   constructor(
     private readonly prisma: PrismaClient,
-    private readonly agents: MultiAgentService
+    private readonly agents: MultiAgentService,
+    private readonly storage: StorageService
   ) {}
 
   async generate(assetId: string) {
@@ -68,7 +70,7 @@ export class MetadataService {
             asset.intelligence && typeof asset.intelligence === "object"
               ? (asset.intelligence as Record<string, unknown>)
               : null,
-          fileUrl: file.url || undefined
+          fileUrl: this.storage.getPublicUrl(file.storageKey) || undefined
         })
         .catch(() => null)) ??
       buildHeuristicPipeline(asset, file);

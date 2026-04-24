@@ -82,7 +82,7 @@ export async function buildApp(): Promise<FastifyInstance & { services: AppServi
   const aiOrchestrator = createCascadeAI();
   const agents = new MultiAgentService(prisma, aiOrchestrator);
   const intelligence = new IntelligenceService(prisma, storage, agents);
-  const metadata = new MetadataService(prisma, agents);
+  const metadata = new MetadataService(prisma, agents, storage);
   const quota = new QuotaService(prisma);
   const purge = new StoragePurgeService(prisma, storage);
   const campaigns = new CampaignService(prisma, queue, audit, agents);

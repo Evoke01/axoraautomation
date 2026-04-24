@@ -165,7 +165,8 @@ function buildPrompt(
   angle: "curiosity" | "authority" | "controversy"
 ): string {
   const platform = ctx.platform === "ALL" ? "YOUTUBE" : ctx.platform;
-  const examples = (EXAMPLES[platform] ?? EXAMPLES.YOUTUBE).slice(0, 2);
+  const platformExamples = EXAMPLES[platform] || EXAMPLES.YOUTUBE!;
+  const examples = platformExamples.slice(0, 2);
   const exampleBlock = examples.map((ex, i) => `
 EXAMPLE ${i + 1}:
 Title: ${ex.title}

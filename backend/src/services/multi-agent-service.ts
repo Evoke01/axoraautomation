@@ -1,7 +1,9 @@
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { Platform, type PrismaClient } from "@prisma/client";
-
 import { aiOrchestrator, type VideoContext } from "../ai/metadata-orchestrator.js";
+import type { AIOrchestrator } from "../ai/orchestrator.js";
+import { env } from "../config/env.js";
+import type { CreatorProfilePack } from "./learning-service.js";
 
 type VisionInsights = {
   hook: string;
@@ -189,6 +191,7 @@ export class MultiAgentService {
   }
 
   async recommendSchedule(context: {
+    assetId: string;
     workspaceId: string;
     timezone: string;
     creatorName: string;
@@ -199,6 +202,7 @@ export class MultiAgentService {
   }): Promise<ScheduleRecommendation | null> {
     const compact = await this.recommendCompactSchedule(
       {
+        assetId: context.assetId,
         workspaceId: context.workspaceId,
         timezone: context.timezone,
         title: context.assetTitle,
@@ -211,6 +215,7 @@ export class MultiAgentService {
         intelligence: context.assetIntelligence
       },
       normalizeInsights({
+        assetId: context.assetId,
         workspaceId: context.workspaceId,
         timezone: context.timezone,
         title: context.assetTitle,

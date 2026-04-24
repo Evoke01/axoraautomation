@@ -332,7 +332,7 @@ SCORING CALIBRATION — use these as your reference points:
 
 function validateScores(scores: unknown, expectedCount: number): { ok: boolean; reason?: string } {
   if (!Array.isArray(scores))
-    return { ok: boolean = false, reason: "not an array" };
+    return { ok: false, reason: "not an array" };
   if (scores.length !== expectedCount)
     return { ok: false, reason: `expected ${expectedCount} scores, got ${scores.length}` };
   for (const s of scores) {

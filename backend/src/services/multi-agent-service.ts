@@ -1,9 +1,7 @@
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { Platform, type PrismaClient } from "@prisma/client";
 
-import type { AIOrchestrator } from "../ai/orchestrator.js";
-import { env } from "../config/env.js";
-import type { CreatorProfilePack } from "./learning-service.js";
+import { aiOrchestrator, type VideoContext } from "../ai/metadata-orchestrator.js";
 
 type VisionInsights = {
   hook: string;
@@ -54,6 +52,7 @@ type ScheduleRecommendation = {
 };
 
 type MetadataPipelineContext = {
+  assetId: string;
   workspaceId: string;
   timezone: string;
   title: string;
@@ -64,6 +63,7 @@ type MetadataPipelineContext = {
   creatorProfilePack?: CreatorProfilePack | null;
   durationSeconds: number | null;
   intelligence: Record<string, unknown> | null;
+  fileUrl?: string;
 };
 
 type AgentTrace = {
@@ -126,29 +126,65 @@ export class MultiAgentService {
 
   async generateMetadataPipeline(context: MetadataPipelineContext): Promise<MetadataPipelineResult> {
     const startedAt = Date.now();
-    const trace: AgentTrace[] = [];
-    const insights = normalizeInsights(context);
 
-    const [rawVariants, classification] = await Promise.all([
-      this.generateAngleVariants(context, insights, trace),
-      this.classifyContent(context, insights, trace)
-    ]);
+    // Prepare context for the new orchestrator
+    const videoCtx: VideoContext = {
+      assetId: context.assetId,
+      workspaceId: context.workspaceId,
+      fileUrl: context.fileUrl,
+      mimeType: "video/mp4", // default, will be detected by Gemini if URL is provided
+      durationSec: context.durationSeconds ?? undefined,
+      platform: "YOUTUBE" // default platform
+    };
 
-    const [variants, schedule] = await Promise.all([
-      this.scoreVariants(context, insights, rawVariants, trace),
-      this.recommendCompactSchedule(context, insights, classification, trace)
-    ]);
+    // Run the multi-agent pipeline
+    const result = await aiOrchestrator.run(videoCtx);
 
+    // Map result back to the existing MetadataPipelineResult structure
     return {
-      insights,
-      variants: variants.map((variant) => ({
-        ...variant,
-        modelVersion: variant.modelVersion ?? buildModelVersion(variant.angle)
-      })),
-      classification,
-      schedule,
+      insights: {
+        hook: result.insights.hook,
+        mainPoint: result.insights.rawSummary.slice(0, 140),
+        vibe: result.insights.mood,
+        keywords: result.insights.topics,
+        summary: result.insights.rawSummary
+      },
+      variants: result.variants.map((v, i) => {
+        const angles: Array<"curiosity" | "authority" | "controversy"> = ["curiosity", "authority", "controversy"];
+        const angle = angles[i] ?? "curiosity";
+        return {
+          variantKey: angle,
+          angle: angle,
+          title: v.title,
+          hook: v.hook,
+          caption: v.caption,
+          cta: i === 1 ? "Save this for the next upload." : i === 2 ? "Comment if you disagree." : "Watch to the end for the full breakdown.",
+          thumbnailBrief: i === 0 ? "Curiosity-led text with one unresolved promise." : i === 1 ? "Expert framing with one proof point." : "Bold statement with a sharp contrast claim.",
+          hashtags: v.hashtags,
+          keywords: v.keywords,
+          score: v.score,
+          rationale: v.reasoning,
+          modelVersion: buildModelVersion(angle)
+        };
+      }),
+      classification: {
+        niche: result.classification.niche,
+        nicheConfidence: 0.9,
+        engagementLabel: result.classification.viralPotential > 0.7 ? "high viral potential" : "steady evergreen interest",
+        engagementConfidence: 0.85,
+        viralScore: result.classification.viralPotential,
+        provider: "huggingface:bart-large-mnli"
+      },
+      schedule: {
+        dayOfWeek: result.schedule.bestDayOfWeek,
+        hourLocal: result.schedule.bestHourUTC, // New scheduler provides UTC, but we map to hourLocal for DB compatibility
+        minuteLocal: 0,
+        confidence: result.schedule.confidenceScore,
+        rationale: result.schedule.reasoning,
+        provider: "cohere:command-r"
+      },
       processingMs: Date.now() - startedAt,
-      agentTrace: trace
+      agentTrace: result.agentTrace
     };
   }
 

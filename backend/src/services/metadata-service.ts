@@ -54,6 +54,7 @@ export class MetadataService {
     const pipeline =
       (await this.agents
         .generateMetadataPipeline({
+          assetId: asset.id,
           workspaceId: asset.workspaceId,
           timezone: asset.workspace.timezone,
           title: asset.title,
@@ -66,7 +67,8 @@ export class MetadataService {
           intelligence:
             asset.intelligence && typeof asset.intelligence === "object"
               ? (asset.intelligence as Record<string, unknown>)
-              : null
+              : null,
+          fileUrl: file.url || undefined
         })
         .catch(() => null)) ??
       buildHeuristicPipeline(asset, file);

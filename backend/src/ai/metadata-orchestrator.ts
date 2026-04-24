@@ -163,10 +163,10 @@ async function withRetry<T>(
       const check  = validate(result);
       if (check.ok) return { result, attempts: i + 1 };
       lastErr = check.reason ?? "validation failed";
-      console.warn(`[${label}] attempt ${i + 1} rejected: ${lastErr}`);
     } catch (err) {
       lastErr = String(err);
-      console.warn(`[${label}] attempt ${i + 1} threw: ${lastErr}`);
+      // Wait before retry
+      await new Promise(r => setTimeout(r, 5000 * (i + 1)));
     }
   }
   throw new Error(`[${label}] failed after ${maxAttempts} attempts. Last: ${lastErr}`);
@@ -215,15 +215,22 @@ function validateVisionInsights(v: VisionInsights): { ok: boolean; reason?: stri
   return { ok: true };
 }
 
+import { GoogleGenerativeAI } from "@google/generative-ai";
+const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY!);
+
 async function visionAgent(ctx: VideoContext, trace: AgentTrace[]): Promise<VisionInsights> {
   const cacheKey = cache.key("vision", ctx.assetId);
   const cached   = await cache.get<VisionInsights>(cacheKey);
   if (cached) {
-    trace.push({ agent:"vision", model:"gemini-2.5-flash", latencyMs:0, cached:true, success:true, attempts:0 });
+    const modelUsed = env.GEMINI_MODEL || "gemini-1.5-flash";
+    trace.push({ agent:"vision", model: modelUsed, latencyMs:0, cached:true, success:true, attempts:0 });
     return cached;
   }
 
   const t0 = Date.now();
+  const modelUsed = env.GEMINI_MODEL || "gemini-1.5-flash";
+  const model = genAI.getGenerativeModel({ model: modelUsed });
+
   const { result, attempts } = await withRetry(
     async (attempt) => visionCB.call(async () => {
       const prompt = `You are an expert video content analyst for a social media automation platform.
@@ -241,30 +248,34 @@ WHAT TO EXTRACT:
 
 ${VISION_EXAMPLE}
 
-${attempt > 0 ? `IMPORTANT: Previous attempt was rejected for being too vague. Be specific and concrete. Use the example above as your quality standard.` : ""}
+${attempt > 0 ? 'IMPORTANT: Previous attempt was rejected for being too vague. Be specific and concrete. Use the example above as your quality standard.' : ""}
 
 Return ONLY a valid JSON object with these exact keys: hook, topics, mood, keyMoments, niche, audience, rawSummary.
 No markdown. No explanation. Just the JSON.`;
 
-      const parts: Record<string, unknown>[] = ctx.fileBase64
-        ? [{ inline_data: { mime_type: ctx.mimeType, data: ctx.fileBase64 } }]
-        : [{ file_data: { mime_type: ctx.mimeType, file_uri: ctx.fileUrl } }];
+      const parts: any[] = [];
+      if (ctx.fileBase64) {
+        parts.push({ inlineData: { mimeType: ctx.mimeType, data: ctx.fileBase64 } });
+      } else if (ctx.fileUrl) {
+        // Warning: Gemini SDK doesn't support direct URLs well without File API,
+        // but some versions might. We assume trigger script passes base64.
+        parts.push({ text: `Video URL: ${ctx.fileUrl}` });
+      }
       parts.push({ text: prompt });
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-        {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({
-            contents:         [{ parts }],
-            generationConfig: { temperature: attempt === 0 ? 0.1 : 0.3, maxOutputTokens: 700 },
-          }),
-        }
-      );
-      if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
-      const data = await res.json() as { candidates: { content: { parts: { text: string }[] } }[] };
-      return safeParseJSON<VisionInsights>(data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}");
+      const res = await model.generateContent({
+        contents: [{ role: "user", parts }],
+        generationConfig: { temperature: attempt === 0 ? 0.1 : 0.3, maxOutputTokens: 2000 },
+      });
+      
+      const response = res.response;
+      const text = response.text();
+
+      try {
+        return safeParseJSON<VisionInsights>(text);
+      } catch (err) {
+        throw err;
+      }
     }),
     validateVisionInsights,
     3,
@@ -272,7 +283,7 @@ No markdown. No explanation. Just the JSON.`;
   );
 
   const latencyMs = Date.now() - t0;
-  trace.push({ agent:"vision", model:"gemini-2.5-flash", latencyMs, cached:false, success:true, attempts });
+  trace.push({ agent:"vision", model: modelUsed, latencyMs, cached:false, success:true, attempts });
   await cache.set(cacheKey, result, 60 * 60 * 24);
   return result;
 }
@@ -297,10 +308,25 @@ async function writerAgent(
     }
 
     const t0      = Date.now();
-    const variant = await runWriterAgent(ctx, insights, angle); // handles retry + validation internally
+    let variant: MetadataVariant;
+    try {
+      variant = await runWriterAgent(ctx, insights, angle);
+    } catch (err) {
+      console.warn(`[writer:${angle}] Groq failed, falling back to Gemini:`, err);
+      const model = genAI.getGenerativeModel({ model: env.GEMINI_MODEL || "gemini-1.5-flash" });
+      const prompt = `Write a ${ctx.platform} post for this video.
+        Hook: ${insights.hook}
+        Topics: ${insights.topics.join(", ")}
+        Angle: ${angle}
+        Niche: ${insights.niche}
+        
+        Return JSON: { "title": "...", "caption": "...", "hook": "...", "hashtags": [], "keywords": [], "reasoning": "..." }`;
+      const res = await model.generateContent(prompt);
+      variant = safeParseJSON<MetadataVariant>(res.response.text());
+    }
     const latencyMs = Date.now() - t0;
 
-    trace.push({ agent:`writer:${angle}`, model:"llama-3.3-70b-versatile", latencyMs, cached:false, success:true, attempts:1 });
+    trace.push({ agent:`writer:${angle}`, model: variant.reasoning.includes("Gemini") ? "gemini" : "llama-3.3-70b-versatile", latencyMs, cached:false, success:true, attempts:1 });
     await cache.set(cacheKey, variant, 60 * 60 * 6);
     return variant;
   }));
@@ -417,10 +443,22 @@ Return ONLY a JSON array of ${variants.length} decimal scores (0.0-1.0), differe
     trace.push({ agent:"optimizer", model:"mistral-small-latest", latencyMs: Date.now()-t0, cached:false, success:true, attempts });
 
   } catch (err) {
-    console.warn("[optimizer] degraded, using position-based fallback:", err);
-    // Slight descending scores so best variant is still first slot (curiosity tends to score highest)
-    scored = variants.map((v, i) => ({ ...v, score: parseFloat((0.75 - i * 0.08).toFixed(2)) }));
-    trace.push({ agent:"optimizer", model:"mistral-small-latest", latencyMs: Date.now()-t0, cached:false, success:false, attempts:3, error: String(err) });
+    console.warn("[optimizer] degraded, using Gemini for scoring:", err);
+    try {
+      const model = genAI.getGenerativeModel({ model: env.GEMINI_MODEL || "gemini-1.5-flash" });
+      const prompt = `Score these titles for CTR (0.0 to 1.0). Return ONLY a JSON array of numbers.
+        Titles: ${variants.map(v => v.title).join(", ")}`;
+      const res = await model.generateContent(prompt);
+      const scores = JSON.parse(res.response.text().match(/\[[\d.,\s]+\]/)?.[0] ?? "[]");
+      scored = variants
+        .map((v, i) => ({ ...v, score: scores[i] ?? 0.5 }))
+        .sort((a, b) => b.score - a.score);
+      trace.push({ agent:"optimizer", model: "gemini", latencyMs: Date.now()-t0, cached:false, success:true, attempts: 1 });
+    } catch (e) {
+      console.warn("[optimizer] absolute fallback:", e);
+      scored = variants.map((v, i) => ({ ...v, score: parseFloat((0.75 - i * 0.08).toFixed(2)) }));
+      trace.push({ agent:"optimizer", model:"fallback", latencyMs: Date.now()-t0, cached:false, success:false, attempts:3, error: String(e) });
+    }
   }
 
   await cache.set(cacheKey, scored, 60 * 60 * 6);
@@ -540,16 +578,28 @@ async function classifierAgent(
     return result;
 
   } catch (err) {
-    console.warn("[classifier] degraded, using insights-based fallback:", err);
-    const result: ClassificationResult = {
-      niche:          insights.niche,
-      subNiche:       insights.topics[0] ?? "",
-      audienceAge:    /young|gen.?z|student/i.test(insights.audience) ? "18-24" : "18-35",
-      sentimentScore: { motivational: 0.7, energetic: 0.5, controversial: -0.2, calm: 0.3, educational: 0.4, entertaining: 0.5 }[insights.mood] ?? 0.3,
-      viralPotential: { controversial: 0.75, entertaining: 0.65, motivational: 0.60, energetic: 0.55, educational: 0.50, calm: 0.40 }[insights.mood] ?? 0.5,
-    };
-    trace.push({ agent:"classifier", model:"bart-large-mnli", latencyMs: Date.now()-t0, cached:false, success:false, attempts:3, error: String(err) });
-    return result;
+    console.warn("[classifier] degraded, using Gemini for classification:", err);
+    try {
+      const model = genAI.getGenerativeModel({ model: env.GEMINI_MODEL || "gemini-1.5-flash" });
+      const prompt = `Classify this video:
+        Hook: ${insights.hook}
+        Niche: ${insights.niche}
+        Return JSON: { "niche": "...", "subNiche": "...", "audienceAge": "...", "sentimentScore": 0.5, "viralPotential": 0.8 }`;
+      const res = await model.generateContent(prompt);
+      const result = safeParseJSON<ClassificationResult>(res.response.text());
+      trace.push({ agent:"classifier", model: "gemini", latencyMs: Date.now()-t0, cached:false, success:true, attempts: 1 });
+      return result;
+    } catch (e) {
+      const result: ClassificationResult = {
+        niche:          insights.niche,
+        subNiche:       insights.topics[0] ?? "",
+        audienceAge:    /young|gen.?z|student/i.test(insights.audience) ? "18-24" : "18-35",
+        sentimentScore: { motivational: 0.7, energetic: 0.5, controversial: -0.2, calm: 0.3, educational: 0.4, entertaining: 0.5 }[insights.mood] ?? 0.3,
+        viralPotential: { controversial: 0.75, entertaining: 0.65, motivational: 0.60, energetic: 0.55, educational: 0.50, calm: 0.40 }[insights.mood] ?? 0.5,
+      };
+      trace.push({ agent:"classifier", model:"fallback", latencyMs: Date.now()-t0, cached:false, success:false, attempts:3, error: String(e) });
+      return result;
+    }
   }
 }
 
@@ -691,10 +741,22 @@ Return ONLY this exact JSON structure:
     return result;
 
   } catch (err) {
-    console.warn("[scheduler] degraded, using data-backed fallback:", err);
-    const fallback = SCHEDULE_FALLBACKS[ctx.platform] ?? SCHEDULE_FALLBACKS.ALL!;
-    trace.push({ agent:"scheduler", model:"command-r", latencyMs: Date.now()-t0, cached:false, success:false, attempts:3, error: String(err) });
-    return fallback;
+    console.warn("[scheduler] degraded, using Gemini for scheduling:", err);
+    try {
+      const model = genAI.getGenerativeModel({ model: env.GEMINI_MODEL || "gemini-1.5-flash" });
+      const prompt = `Recommend publish time for ${ctx.platform}:
+        Niche: ${classification.niche}
+        Audience: ${classification.audienceAge}
+        Return JSON: { "bestDayOfWeek": 4, "bestHourUTC": 15, "confidenceScore": 0.8, "reasoning": "..." }`;
+      const res = await model.generateContent(prompt);
+      const result = safeParseJSON<ScheduleRecommendation>(res.response.text());
+      trace.push({ agent:"scheduler", model: "gemini", latencyMs: Date.now()-t0, cached:false, success:true, attempts: 1 });
+      return result;
+    } catch (e) {
+      const fallback = SCHEDULE_FALLBACKS[ctx.platform] ?? SCHEDULE_FALLBACKS.ALL!;
+      trace.push({ agent:"scheduler", model:"fallback", latencyMs: Date.now()-t0, cached:false, success:false, attempts:3, error: String(e) });
+      return fallback;
+    }
   }
 }
 

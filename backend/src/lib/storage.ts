@@ -158,4 +158,15 @@ export class StorageService {
 
     return `${env.S3_ENDPOINT.replace(/\/$/, "")}/${env.S3_BUCKET}/${objectKey}`;
   }
+
+  async getSignedUrl(objectKey: string, expiresIn = 3600) {
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: env.S3_BUCKET,
+        Key: objectKey
+      }),
+      { expiresIn }
+    );
+  }
 }

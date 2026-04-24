@@ -70,7 +70,7 @@ export class MetadataService {
             asset.intelligence && typeof asset.intelligence === "object"
               ? (asset.intelligence as Record<string, unknown>)
               : null,
-          fileUrl: this.storage.getPublicUrl(file.storageKey) || undefined
+          fileUrl: (await this.storage.getSignedUrl(file.storageKey)) || undefined
         })
         .catch(() => null)) ??
       buildHeuristicPipeline(asset, file);

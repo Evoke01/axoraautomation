@@ -66,6 +66,7 @@ type MetadataPipelineContext = {
   durationSeconds: number | null;
   intelligence: Record<string, unknown> | null;
   fileUrl?: string;
+  fileBase64?: string;
 };
 
 type AgentTrace = {
@@ -134,6 +135,7 @@ export class MultiAgentService {
       assetId: context.assetId,
       workspaceId: context.workspaceId,
       fileUrl: context.fileUrl,
+      fileBase64: context.fileBase64,
       mimeType: "video/mp4", // default, will be detected by Gemini if URL is provided
       durationSec: context.durationSeconds ?? undefined,
       platform: "YOUTUBE" // default platform
